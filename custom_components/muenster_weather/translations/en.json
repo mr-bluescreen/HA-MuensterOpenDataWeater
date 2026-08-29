@@ -1,0 +1,15 @@
+{
+  "title": "Münster Open Data Weather",
+  "config": {
+    "step": {"user": {"title": "Select a weather station", "description": "Choose one of the stations published by the City of Münster.", "data": {"station_id": "Weather station"}}},
+    "error": {"cannot_connect": "Unable to connect to the Münster Open Data portal", "station_unavailable": "The selected station is no longer available"},
+    "abort": {"already_configured": "This weather station is already configured"}
+  },
+  "entity": {
+    "sensor": {
+      "temperature": {"name": "Temperature"}, "humidity": {"name": "Humidity"}, "pressure": {"name": "Atmospheric pressure"},
+      "wind_speed": {"name": "Wind speed"}, "precipitation": {"name": "Precipitation"}, "illuminance": {"name": "Illuminance"}
+    },
+    "weather": {"current": {"name": "Current weather"}}
+  }
+}

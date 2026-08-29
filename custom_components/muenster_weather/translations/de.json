@@ -1,0 +1,15 @@
+{
+  "title": "Münster Open-Data-Wetter",
+  "config": {
+    "step": {"user": {"title": "Wetterstation auswählen", "description": "Wähle eine der von der Stadt Münster veröffentlichten Stationen aus.", "data": {"station_id": "Wetterstation"}}},
+    "error": {"cannot_connect": "Verbindung zum Open-Data-Portal Münster fehlgeschlagen", "station_unavailable": "Die ausgewählte Station ist nicht mehr verfügbar"},
+    "abort": {"already_configured": "Diese Wetterstation ist bereits eingerichtet"}
+  },
+  "entity": {
+    "sensor": {
+      "temperature": {"name": "Temperatur"}, "humidity": {"name": "Luftfeuchtigkeit"}, "pressure": {"name": "Luftdruck"},
+      "wind_speed": {"name": "Windgeschwindigkeit"}, "precipitation": {"name": "Niederschlag"}, "illuminance": {"name": "Beleuchtungsstärke"}
+    },
+    "weather": {"current": {"name": "Aktuelles Wetter"}}
+  }
+}
