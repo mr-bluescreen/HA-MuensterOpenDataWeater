@@ -1,0 +1,13 @@
+{
+  "domain": "muenster_weather",
+  "name": "Münster Open Data Weather",
+  "codeowners": [],
+  "config_flow": true,
+  "documentation": "https://github.com/Anzinger/HA-MuensterOpenDataWeater",
+  "integration_type": "service",
+  "iot_class": "cloud_polling",
+  "issue_tracker": "https://github.com/Anzinger/HA-MuensterOpenDataWeater/issues",
+  "loggers": ["custom_components.muenster_weather"],
+  "requirements": [],
+  "version": "1.0.0"
+}
