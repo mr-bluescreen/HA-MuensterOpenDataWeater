@@ -4,7 +4,8 @@ A Home Assistant custom integration for observations published in the City of M�
 
 ## Features
 
-- UI-only setup with a dynamically populated station selector
+- UI-only setup with either a dynamically populated station selector or an automatic local average
+- Inverse-distance weighting of the nearest geolocated stations, with configurable radius and station count
 - One device per station, with current weather plus temperature, humidity, atmospheric pressure, wind speed, precipitation and illuminance sensors
 - Five-minute coordinated polling (one request shared by all entities)
 - Stable unique IDs, diagnostics through Home Assistant's coordinator logging, clean unload, and localized English/German UI
@@ -28,7 +29,8 @@ Copy `custom_components/muenster_weather` into the `custom_components` directory
 
 1. Open **Settings → Devices & services → Add integration**.
 2. Search for **Münster Open Data Weather**.
-3. Select a station published by the portal and submit.
+3. Select either a station published by the portal or **Calculate local average**.
+4. For the automatic mode, choose a search radius and maximum station count. The integration uses the latitude and longitude configured under Home Assistant's general settings and exposes the contributing stations and distances as entity attributes.
 
 Add the integration again to monitor another station. A station can only be configured once.
 

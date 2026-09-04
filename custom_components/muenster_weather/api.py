@@ -5,6 +5,7 @@ import csv
 from dataclasses import dataclass
 from datetime import datetime
 import io
+import math
 from typing import Any
 
 from aiohttp import ClientError, ClientSession
@@ -30,6 +31,8 @@ class Station:
 
     station_id: str
     name: str
+    latitude: float | None = None
+    longitude: float | None = None
 
 
 _ALIASES = {
@@ -43,11 +46,14 @@ _ALIASES = {
     "wind_bearing": ("wind_bearing", "windrichtung", "wind_direction"),
     "precipitation": ("precipitation", "niederschlag", "rain", "regen"),
     "illuminance": ("illuminance", "beleuchtungsstaerke", "helligkeit", "lux"),
+    "latitude": ("latitude", "lat", "breitengrad", "geo_lat", "y"),
+    "longitude": ("longitude", "lon", "lng", "laengengrad", "langengrad", "geo_lon", "x"),
 }
 
 
 def _normalise(value: str) -> str:
-    return "".join(char for char in value.casefold().replace("ß", "ss") if char.isalnum() or char == "_")
+    value = value.casefold().translate(str.maketrans({"ä": "ae", "ö": "oe", "ü": "ue", "ß": "ss"}))
+    return "".join(char for char in value if char.isalnum() or char == "_")
 
 
 def _value(row: dict[str, str], field: str) -> str | None:
@@ -120,7 +126,12 @@ class MuensterWeatherClient:
         for row in await self._rows():
             station_id = _value(row, "station_id")
             if station_id:
-                stations[station_id] = Station(station_id, _value(row, "station_name") or station_id)
+                stations[station_id] = Station(
+                    station_id,
+                    _value(row, "station_name") or station_id,
+                    _number(_value(row, "latitude")),
+                    _number(_value(row, "longitude")),
+                )
         if not stations:
             raise MuensterWeatherDataError("No stations found")
         return sorted(stations.values(), key=lambda station: station.name.casefold())
@@ -129,17 +140,85 @@ class MuensterWeatherClient:
         matching = [row for row in await self._rows() if _value(row, "station_id") == station_id]
         if not matching:
             raise MuensterWeatherDataError(f"Station {station_id} is absent from the dataset")
-        row = matching[-1]
-        timestamp = _value(row, "timestamp")
-        observed_at = None
-        if timestamp:
-            try:
-                observed_at = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
-            except ValueError:
-                pass
-        return {
-            "observed_at": observed_at,
-            **{field: _number(_value(row, field)) for field in (
-                "temperature", "humidity", "pressure", "wind_speed", "wind_bearing", "precipitation", "illuminance"
-            )},
-        }
+        return _observation(matching[-1])
+
+    async def async_get_averaged_observation(
+        self,
+        latitude: float,
+        longitude: float,
+        radius_km: float,
+        max_stations: int,
+    ) -> dict[str, Any]:
+        """Return a distance-weighted observation around a position."""
+        rows = await self._rows()
+        latest: dict[str, dict[str, str]] = {}
+        stations: dict[str, Station] = {}
+        for row in rows:
+            station_id = _value(row, "station_id")
+            if not station_id:
+                continue
+            latest[station_id] = row
+            stations[station_id] = Station(
+                station_id,
+                _value(row, "station_name") or station_id,
+                _number(_value(row, "latitude")),
+                _number(_value(row, "longitude")),
+            )
+        nearby = sorted(
+            (
+                (_distance_km(latitude, longitude, station.latitude, station.longitude), station)
+                for station in stations.values()
+                if station.latitude is not None and station.longitude is not None
+            ),
+            key=lambda item: item[0],
+        )
+        nearby = [item for item in nearby if item[0] <= radius_km][:max_stations]
+        if not nearby:
+            raise MuensterWeatherDataError("No geolocated station is within the configured radius")
+
+        observations = [(_observation(latest[station.station_id]), distance, station) for distance, station in nearby]
+        weights = [1 / max(distance, 0.05) for _, distance, _ in observations]
+        result: dict[str, Any] = {}
+        for field in ("temperature", "humidity", "pressure", "wind_speed", "precipitation", "illuminance"):
+            values = [(observation[field], weight) for (observation, _, _), weight in zip(observations, weights) if observation[field] is not None]
+            result[field] = sum(value * weight for value, weight in values) / sum(weight for _, weight in values) if values else None
+        bearings = [(observation["wind_bearing"], weight) for (observation, _, _), weight in zip(observations, weights) if observation["wind_bearing"] is not None]
+        if bearings:
+            x = sum(math.cos(math.radians(value)) * weight for value, weight in bearings)
+            y = sum(math.sin(math.radians(value)) * weight for value, weight in bearings)
+            result["wind_bearing"] = math.degrees(math.atan2(y, x)) % 360
+        else:
+            result["wind_bearing"] = None
+        timestamps = [observation["observed_at"] for observation, _, _ in observations if observation["observed_at"]]
+        result["observed_at"] = max(timestamps) if timestamps else None
+        result["stations"] = [
+            {"station_id": station.station_id, "name": station.name, "distance_km": round(distance, 2)}
+            for _, distance, station in observations
+        ]
+        return result
+
+
+def _observation(row: dict[str, str]) -> dict[str, Any]:
+    """Normalise one source row."""
+    timestamp = _value(row, "timestamp")
+    observed_at = None
+    if timestamp:
+        try:
+            observed_at = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+        except ValueError:
+            pass
+    return {
+        "observed_at": observed_at,
+        **{field: _number(_value(row, field)) for field in (
+            "temperature", "humidity", "pressure", "wind_speed", "wind_bearing", "precipitation", "illuminance"
+        )},
+    }
+
+
+def _distance_km(latitude: float, longitude: float, other_latitude: float, other_longitude: float) -> float:
+    """Calculate the great-circle distance between two WGS84 positions."""
+    lat1, lat2 = math.radians(latitude), math.radians(other_latitude)
+    delta_lat = lat2 - lat1
+    delta_lon = math.radians(other_longitude - longitude)
+    value = math.sin(delta_lat / 2) ** 2 + math.cos(lat1) * math.cos(lat2) * math.sin(delta_lon / 2) ** 2
+    return 6371.0088 * 2 * math.atan2(math.sqrt(value), math.sqrt(1 - value))
