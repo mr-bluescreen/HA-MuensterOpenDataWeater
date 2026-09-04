@@ -90,9 +90,16 @@ class MuensterWeatherClient:
         except (ClientError, TimeoutError) as err:
             raise MuensterWeatherConnectionError from err
 
-    async def _resource_url(self) -> str:
+    async def _resource_urls(self) -> list[str]:
+        """Return machine-readable resources, preferring the newest one.
+
+        The portal occasionally leaves a broken generated resource (for example a
+        failed zipball download) as the newest dataset resource.  Keep the older
+        resources as fallbacks instead of making that one portal entry take the
+        integration down.
+        """
         if self._data_url:
-            return self._data_url
+            return [self._data_url]
         payload = await self._request(CKAN_API, params={"id": DATASET_ID})
         result = payload.get("result", {}) if isinstance(payload, dict) else {}
         resources = result.get("resources", [])
@@ -103,14 +110,38 @@ class MuensterWeatherClient:
         if not candidates:
             raise MuensterWeatherDataError("The dataset contains no CSV or JSON resource")
         # The portal orders resources chronologically; the latest machine-readable file wins.
-        self._data_url = candidates[-1]["url"]
-        return self._data_url
+        return [item["url"] for item in reversed(candidates)]
+
+    async def _resource_url(self) -> str:
+        """Return the preferred resource URL (kept for API compatibility)."""
+        return (await self._resource_urls())[0]
 
     async def _rows(self) -> list[dict[str, str]]:
-        payload = await self._request(await self._resource_url())
+        errors: list[MuensterWeatherApiError] = []
+        for url in await self._resource_urls():
+            try:
+                rows = await self._rows_from_url(url)
+                if not any(_value(row, "station_id") for row in rows):
+                    raise MuensterWeatherDataError(
+                        "The resource contains no weather-station records"
+                    )
+            except MuensterWeatherApiError as err:
+                errors.append(err)
+                continue
+            self._data_url = url
+            return rows
+        if errors and all(isinstance(err, MuensterWeatherConnectionError) for err in errors):
+            raise MuensterWeatherConnectionError("No dataset resource could be reached")
+        raise MuensterWeatherDataError("No usable CSV or JSON resource found")
+
+    async def _rows_from_url(self, url: str) -> list[dict[str, str]]:
+        """Download and parse one dataset resource."""
+        payload = await self._request(url)
         if isinstance(payload, dict):
             payload = payload.get("result", {}).get("records", payload.get("records", []))
         if isinstance(payload, list):
+            if not all(isinstance(row, dict) for row in payload):
+                raise MuensterWeatherDataError("Invalid JSON data")
             return [{str(k): str(v) for k, v in row.items()} for row in payload]
         if not isinstance(payload, str):
             raise MuensterWeatherDataError("Unsupported resource format")
