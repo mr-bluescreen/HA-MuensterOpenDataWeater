@@ -48,3 +48,29 @@ class TestApi(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(observation["humidity"], 72)
         self.assertEqual(observation["pressure"], 1012.3)
         self.assertIsNone(observation["wind_speed"])
+
+    async def test_distance_weighted_average_uses_nearby_stations(self):
+        client = MuensterWeatherClient(None)
+        client._rows = AsyncMock(return_value=[
+            {"Station": "near", "Standort": "Nah", "Breitengrad": "51,9600", "Längengrad": "7,6300", "Temperatur": "10", "Windrichtung": "350"},
+            {"Station": "far", "Standort": "Fern", "Breitengrad": "51,9600", "Längengrad": "7,6600", "Temperatur": "20", "Windrichtung": "10"},
+            {"Station": "outside", "Breitengrad": "52,1000", "Längengrad": "7,6300", "Temperatur": "99"},
+        ])
+
+        observation = await client.async_get_averaged_observation(51.96, 7.63, 5, 2)
+
+        self.assertLess(observation["temperature"], 11)
+        self.assertTrue(observation["wind_bearing"] < 10 or observation["wind_bearing"] > 350)
+        self.assertEqual([item["station_id"] for item in observation["stations"]], ["near", "far"])
+
+    async def test_average_limits_number_of_stations(self):
+        client = MuensterWeatherClient(None)
+        client._rows = AsyncMock(return_value=[
+            {"Station": "one", "lat": "51.96", "lon": "7.63", "Temperatur": "12"},
+            {"Station": "two", "lat": "51.97", "lon": "7.63", "Temperatur": "24"},
+        ])
+
+        observation = await client.async_get_averaged_observation(51.96, 7.63, 10, 1)
+
+        self.assertEqual(observation["temperature"], 12)
+        self.assertEqual(len(observation["stations"]), 1)
