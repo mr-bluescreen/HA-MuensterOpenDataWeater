@@ -6,7 +6,7 @@
       "station": {"title": "Wetterstation auswählen", "description": "Wähle eine der von der Stadt Münster veröffentlichten Stationen aus.", "data": {"station_id": "Wetterstation"}},
       "automatic": {"title": "Lokalen Mittelwert berechnen", "description": "Verwendet den Home-Assistant-Standort ({latitude}, {longitude}). Die nächstgelegenen Stationen im Radius werden invers zur Entfernung gewichtet.", "data": {"radius_km": "Maximaler Radius (km)", "max_stations": "Maximale Anzahl Stationen"}}
     },
-    "error": {"cannot_connect": "Verbindung zum Open-Data-Portal Münster fehlgeschlagen", "station_unavailable": "Die ausgewählte Station ist nicht mehr verfügbar", "no_nearby_stations": "In diesem Radius wurde keine Station mit Koordinaten gefunden"},
+    "error": {"cannot_connect": "Verbindung zum Open-Data-Portal Münster fehlgeschlagen", "invalid_data": "Das Portal liefert derzeit keine nutzbaren Wetterstationsdaten. Bitte versuche es später erneut", "station_unavailable": "Die ausgewählte Station ist nicht mehr verfügbar", "no_nearby_stations": "In diesem Radius wurde keine Station mit Koordinaten gefunden"},
     "abort": {"already_configured": "Diese Wetterquelle ist bereits eingerichtet"}
   },
   "entity": {

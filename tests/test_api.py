@@ -27,6 +27,27 @@ MuensterWeatherClient = sys.modules[f"{PACKAGE}.api"].MuensterWeatherClient
 
 
 class TestApi(unittest.IsolatedAsyncioTestCase):
+    async def test_broken_latest_resource_falls_back_to_previous_resource(self):
+        client = MuensterWeatherClient(None)
+        client._request = AsyncMock(side_effect=[
+            {
+                "result": {
+                    "resources": [
+                        {"format": "CSV", "url": "https://example.test/working.csv"},
+                        {"format": "CSV", "url": "https://example.test/broken.csv"},
+                    ]
+                }
+            },
+            "failed to download zipball",
+            "Station;Standort;Temperatur\n1;Aasee;19,5\n",
+        ])
+
+        stations = await client.async_get_stations()
+
+        self.assertEqual([station.station_id for station in stations], ["1"])
+        self.assertEqual(client._data_url, "https://example.test/working.csv")
+        self.assertEqual(client._request.await_count, 3)
+
     async def test_stations_are_deduplicated_and_sorted(self):
         client = MuensterWeatherClient(None)
         client._rows = AsyncMock(return_value=[

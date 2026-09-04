@@ -8,7 +8,12 @@ import voluptuous as vol
 from homeassistant.config_entries import ConfigFlow, ConfigFlowResult
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
-from .api import MuensterWeatherApiError, MuensterWeatherClient, MuensterWeatherConnectionError
+from .api import (
+    MuensterWeatherApiError,
+    MuensterWeatherClient,
+    MuensterWeatherConnectionError,
+    MuensterWeatherDataError,
+)
 from .const import (
     AUTOMATIC_ID,
     CONF_LATITUDE,
@@ -41,8 +46,11 @@ class MuensterWeatherConfigFlow(ConfigFlow, domain=DOMAIN):
         try:
             stations = await self._client().async_get_stations()
             options = {station.station_id: station.name for station in stations}
-        except MuensterWeatherApiError:
+        except MuensterWeatherConnectionError:
             errors["base"] = "cannot_connect"
+            options = {}
+        except MuensterWeatherDataError:
+            errors["base"] = "invalid_data"
             options = {}
 
         if user_input is not None and not errors:
@@ -63,7 +71,11 @@ class MuensterWeatherConfigFlow(ConfigFlow, domain=DOMAIN):
 
         return self.async_show_form(
             step_id="station",
-            data_schema=vol.Schema({vol.Required(CONF_STATION_ID): vol.In(options)}),
+            data_schema=(
+                vol.Schema({vol.Required(CONF_STATION_ID): vol.In(options)})
+                if options
+                else vol.Schema({})
+            ),
             errors=errors,
         )
 
