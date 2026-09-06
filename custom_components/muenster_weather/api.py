@@ -56,8 +56,14 @@ def _normalise(value: str) -> str:
     return "".join(char for char in value if char.isalnum() or char == "_")
 
 
-def _value(row: dict[str, str], field: str) -> str | None:
-    normalised = {_normalise(key): value for key, value in row.items()}
+def _value(row: dict[str | None, Any], field: str) -> str | None:
+    # DictReader stores surplus columns under a ``None`` key.  A single
+    # malformed row in the public dataset must not make the config flow crash.
+    normalised = {
+        _normalise(key): value
+        for key, value in row.items()
+        if isinstance(key, str) and isinstance(value, str)
+    }
     for alias in _ALIASES[field]:
         if (value := normalised.get(_normalise(alias))) not in (None, ""):
             return value.strip()
