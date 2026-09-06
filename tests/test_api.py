@@ -24,9 +24,56 @@ for module_name in ("const", "api"):
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
 MuensterWeatherClient = sys.modules[f"{PACKAGE}.api"].MuensterWeatherClient
+MuensterWeatherDataError = sys.modules[f"{PACKAGE}.api"].MuensterWeatherDataError
 
 
 class TestApi(unittest.IsolatedAsyncioTestCase):
+    async def test_package_list_response_exposes_resources(self):
+        client = MuensterWeatherClient(None)
+        client._request = AsyncMock(
+            side_effect=[
+                {
+                    "result": [
+                        {
+                            "resources": [
+                                {
+                                    "format": "CSV",
+                                    "url": "https://example.test/weather.csv",
+                                }
+                            ]
+                        }
+                    ]
+                },
+                "Station;Standort\n1;Aasee\n",
+            ]
+        )
+
+        stations = await client.async_get_stations()
+
+        self.assertEqual([station.station_id for station in stations], ["1"])
+
+    async def test_resource_list_response_exposes_resources(self):
+        client = MuensterWeatherClient(None)
+        client._request = AsyncMock(
+            return_value={
+                "result": [
+                    {"format": "CSV", "url": "https://example.test/weather.csv"},
+                    "invalid resource",
+                ]
+            }
+        )
+
+        urls = await client._resource_urls()
+
+        self.assertEqual(urls, ["https://example.test/weather.csv"])
+
+    async def test_invalid_metadata_raises_data_error(self):
+        client = MuensterWeatherClient(None)
+        client._request = AsyncMock(return_value={"result": "invalid"})
+
+        with self.assertRaises(MuensterWeatherDataError):
+            await client._resource_urls()
+
     async def test_broken_latest_resource_falls_back_to_previous_resource(self):
         client = MuensterWeatherClient(None)
         client._request = AsyncMock(side_effect=[
