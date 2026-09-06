@@ -6,7 +6,7 @@
       "station": {"title": "Select a weather station", "description": "Choose one of the stations published by the City of Münster.", "data": {"station_id": "Weather station"}},
       "automatic": {"title": "Calculate local average", "description": "Uses the Home Assistant location ({latitude}, {longitude}). The nearest stations inside the radius are weighted by inverse distance.", "data": {"radius_km": "Maximum radius (km)", "max_stations": "Maximum number of stations"}}
     },
-    "error": {"cannot_connect": "Unable to connect to the Münster Open Data portal", "invalid_data": "The portal currently provides no usable weather-station data. Please try again later", "station_unavailable": "The selected station is no longer available", "no_nearby_stations": "No station with coordinates was found inside this radius"},
+    "error": {"cannot_connect": "Unable to connect to the Münster Open Data portal", "invalid_data": "The portal currently provides no usable weather-station data. Please try again later", "station_unavailable": "The selected station is no longer available", "no_nearby_stations": "No station with coordinates was found inside this radius", "unknown": "An unexpected error occurred. Details were written to the Home Assistant log"},
     "abort": {"already_configured": "This weather source is already configured"}
   },
   "entity": {

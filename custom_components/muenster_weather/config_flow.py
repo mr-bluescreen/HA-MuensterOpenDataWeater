@@ -1,6 +1,7 @@
 """Config flow for Münster Open Data Weather."""
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 import voluptuous as vol
@@ -12,7 +13,6 @@ from .api import (
     MuensterWeatherApiError,
     MuensterWeatherClient,
     MuensterWeatherConnectionError,
-    MuensterWeatherDataError,
 )
 from .const import (
     AUTOMATIC_ID,
@@ -30,6 +30,8 @@ from .const import (
     MODE_STATION,
 )
 
+_LOGGER = logging.getLogger(__name__)
+
 
 class MuensterWeatherConfigFlow(ConfigFlow, domain=DOMAIN):
     """Configure a station or a location-based aggregate."""
@@ -46,11 +48,16 @@ class MuensterWeatherConfigFlow(ConfigFlow, domain=DOMAIN):
         try:
             stations = await self._client().async_get_stations()
             options = {station.station_id: station.name for station in stations}
-        except MuensterWeatherConnectionError:
-            errors["base"] = "cannot_connect"
+        except MuensterWeatherApiError as err:
+            errors["base"] = (
+                "cannot_connect"
+                if isinstance(err, MuensterWeatherConnectionError)
+                else "invalid_data"
+            )
             options = {}
-        except MuensterWeatherDataError:
-            errors["base"] = "invalid_data"
+        except Exception:  # noqa: BLE001 - prevent an opaque HA flow failure
+            _LOGGER.exception("Unexpected error while loading Münster weather stations")
+            errors["base"] = "unknown"
             options = {}
 
         if user_input is not None and not errors:
@@ -96,6 +103,9 @@ class MuensterWeatherConfigFlow(ConfigFlow, domain=DOMAIN):
                 errors["base"] = "cannot_connect"
             except MuensterWeatherApiError:
                 errors["base"] = "no_nearby_stations"
+            except Exception:  # noqa: BLE001 - prevent an opaque HA flow failure
+                _LOGGER.exception("Unexpected error while calculating local weather average")
+                errors["base"] = "unknown"
             else:
                 await self.async_set_unique_id(AUTOMATIC_ID)
                 self._abort_if_unique_id_configured()

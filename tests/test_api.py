@@ -58,6 +58,17 @@ class TestApi(unittest.IsolatedAsyncioTestCase):
         stations = await client.async_get_stations()
         self.assertEqual([station.station_id for station in stations], ["1", "2"])
 
+    async def test_surplus_csv_columns_do_not_break_station_loading(self):
+        client = MuensterWeatherClient(None)
+        client._rows = AsyncMock(return_value=[
+            {"Station": "1", "Standort": "Aasee", None: ["unexpected"]}
+        ])
+
+        stations = await client.async_get_stations()
+
+        self.assertEqual(stations[0].station_id, "1")
+        self.assertEqual(stations[0].name, "Aasee")
+
     async def test_latest_observation_is_normalised(self):
         client = MuensterWeatherClient(None)
         client._rows = AsyncMock(return_value=[
