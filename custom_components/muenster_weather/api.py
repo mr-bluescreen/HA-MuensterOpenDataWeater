@@ -107,11 +107,41 @@ class MuensterWeatherClient:
         if self._data_url:
             return [self._data_url]
         payload = await self._request(CKAN_API, params={"id": DATASET_ID})
-        result = payload.get("result", {}) if isinstance(payload, dict) else {}
-        resources = result.get("resources", [])
+        if not isinstance(payload, dict):
+            raise MuensterWeatherDataError("Invalid dataset metadata")
+
+        result = payload.get("result", {})
+        if isinstance(result, dict):
+            resources = result.get("resources", [])
+        elif isinstance(result, list):
+            # Although CKAN normally returns one package object, Münster's portal
+            # can wrap that object in a list.  It can also return the resource
+            # objects directly, so accept both representations.
+            package_resources = [
+                item.get("resources")
+                for item in result
+                if isinstance(item, dict) and "resources" in item
+            ]
+            resources = (
+                [
+                    resource
+                    for group in package_resources
+                    if isinstance(group, list)
+                    for resource in group
+                ]
+                if package_resources
+                else result
+            )
+        else:
+            raise MuensterWeatherDataError("Invalid dataset metadata")
+
+        if not isinstance(resources, list):
+            raise MuensterWeatherDataError("Invalid dataset resources")
         candidates = [
             item for item in resources
-            if str(item.get("format", "")).casefold() in {"csv", "json"} and item.get("url")
+            if isinstance(item, dict)
+            and str(item.get("format", "")).casefold() in {"csv", "json"}
+            and item.get("url")
         ]
         if not candidates:
             raise MuensterWeatherDataError("The dataset contains no CSV or JSON resource")
