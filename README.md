@@ -36,7 +36,7 @@ Add the integration again to monitor another station. A station can only be conf
 
 ## Data source and privacy
 
-The integration connects directly to the City of Münster Open Data portal over HTTPS and downloads the machine-readable resource advertised by the dataset metadata. It sends no credentials or Home Assistant data. Attribution and dataset licensing remain with the [City of Münster Open Data portal](https://opendata.stadt-muenster.de/).
+The integration connects directly to the City of Münster Open Data services over HTTPS. It loads the station selector from the city's dedicated [WFS station master-data CSV](https://geo.stadt-muenster.de/mapserv/wetterstationen_serv?SERVICE=WFS&VERSION=1.1.0&REQUEST=GetFeature&TYPENAME=wetterstationen&OUTPUTFORMAT=CSV_STAMMDATEN) and downloads observations from the machine-readable resource advertised by the dataset metadata. It sends no credentials or Home Assistant data. Attribution and dataset licensing remain with the [City of Münster Open Data portal](https://opendata.stadt-muenster.de/).
 
 ## Troubleshooting
 

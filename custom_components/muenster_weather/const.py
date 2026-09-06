@@ -4,6 +4,11 @@ DOMAIN = "muenster_weather"
 DEFAULT_SCAN_INTERVAL = 300
 DATASET_ID = "messdaten-der-wetterstationen-aus-dem-projekt-stadt-temperatur"
 CKAN_API = "https://opendata.stadt-muenster.de/api/3/action/package_show"
+STATIONS_URL = (
+    "https://geo.stadt-muenster.de/mapserv/wetterstationen_serv"
+    "?SERVICE=WFS&VERSION=1.1.0&REQUEST=GetFeature"
+    "&TYPENAME=wetterstationen&OUTPUTFORMAT=CSV_STAMMDATEN"
+)
 CONF_STATION_ID = "station_id"
 CONF_STATION_NAME = "station_name"
 CONF_MODE = "mode"
