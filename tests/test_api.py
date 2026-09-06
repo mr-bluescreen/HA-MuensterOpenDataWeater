@@ -25,32 +25,36 @@ for module_name in ("const", "api"):
     spec.loader.exec_module(module)
 MuensterWeatherClient = sys.modules[f"{PACKAGE}.api"].MuensterWeatherClient
 MuensterWeatherDataError = sys.modules[f"{PACKAGE}.api"].MuensterWeatherDataError
+STATIONS_URL = sys.modules[f"{PACKAGE}.const"].STATIONS_URL
 
 
 class TestApi(unittest.IsolatedAsyncioTestCase):
-    async def test_package_list_response_exposes_resources(self):
+    async def test_station_registry_uses_dedicated_wfs_csv(self):
         client = MuensterWeatherClient(None)
         client._request = AsyncMock(
-            side_effect=[
-                {
-                    "result": [
-                        {
-                            "resources": [
-                                {
-                                    "format": "CSV",
-                                    "url": "https://example.test/weather.csv",
-                                }
-                            ]
-                        }
-                    ]
-                },
-                "Station;Standort\n1;Aasee\n",
-            ]
+            return_value="Station;Standort\n1;Aasee\n",
         )
 
         stations = await client.async_get_stations()
 
         self.assertEqual([station.station_id for station in stations], ["1"])
+        client._request.assert_awaited_once_with(STATIONS_URL)
+
+    async def test_station_registry_accepts_punctuated_wfs_headers(self):
+        client = MuensterWeatherClient(None)
+        client._request = AsyncMock(
+            return_value=(
+                "Stations-ID;Bezeichnung;Breitengrad;Längengrad\n"
+                "17;Coerde;51,99;7,64\n"
+            )
+        )
+
+        stations = await client.async_get_stations()
+
+        self.assertEqual(stations[0].station_id, "17")
+        self.assertEqual(stations[0].name, "Coerde")
+        self.assertEqual(stations[0].latitude, 51.99)
+        self.assertEqual(stations[0].longitude, 7.64)
 
     async def test_resource_list_response_exposes_resources(self):
         client = MuensterWeatherClient(None)
@@ -89,15 +93,15 @@ class TestApi(unittest.IsolatedAsyncioTestCase):
             "Station;Standort;Temperatur\n1;Aasee;19,5\n",
         ])
 
-        stations = await client.async_get_stations()
+        rows = await client._rows()
 
-        self.assertEqual([station.station_id for station in stations], ["1"])
+        self.assertEqual(rows[0]["Station"], "1")
         self.assertEqual(client._data_url, "https://example.test/working.csv")
         self.assertEqual(client._request.await_count, 3)
 
     async def test_stations_are_deduplicated_and_sorted(self):
         client = MuensterWeatherClient(None)
-        client._rows = AsyncMock(return_value=[
+        client._rows_from_url = AsyncMock(return_value=[
             {"Station": "2", "Standort": "Zentrum"},
             {"Station": "1", "Standort": "Aasee"},
             {"Station": "1", "Standort": "Aasee"},
@@ -107,7 +111,7 @@ class TestApi(unittest.IsolatedAsyncioTestCase):
 
     async def test_surplus_csv_columns_do_not_break_station_loading(self):
         client = MuensterWeatherClient(None)
-        client._rows = AsyncMock(return_value=[
+        client._rows_from_url = AsyncMock(return_value=[
             {"Station": "1", "Standort": "Aasee", None: ["unexpected"]}
         ])
 

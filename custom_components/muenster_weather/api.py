@@ -10,7 +10,7 @@ from typing import Any
 
 from aiohttp import ClientError, ClientSession
 
-from .const import CKAN_API, DATASET_ID
+from .const import CKAN_API, DATASET_ID, STATIONS_URL
 
 
 class MuensterWeatherApiError(Exception):
@@ -36,8 +36,13 @@ class Station:
 
 
 _ALIASES = {
-    "station_id": ("station_id", "stations_id", "station", "stationsname", "id", "sensor_id"),
-    "station_name": ("station_name", "stationsname", "name", "standort", "location"),
+    "station_id": (
+        "station_id", "stations_id", "stationsnummer", "station", "stationsname",
+        "wetterstation", "id", "sensor_id",
+    ),
+    "station_name": (
+        "station_name", "stationsname", "bezeichnung", "name", "standort", "location",
+    ),
     "timestamp": ("timestamp", "zeitstempel", "datetime", "datum", "time", "created_at"),
     "temperature": ("temperature", "temperatur", "temp", "lufttemperatur"),
     "humidity": ("humidity", "luftfeuchtigkeit", "relative_feuchte", "feuchtigkeit"),
@@ -53,7 +58,9 @@ _ALIASES = {
 
 def _normalise(value: str) -> str:
     value = value.casefold().translate(str.maketrans({"ä": "ae", "ö": "oe", "ü": "ue", "ß": "ss"}))
-    return "".join(char for char in value if char.isalnum() or char == "_")
+    # Treat spaces, underscores and punctuation alike. WFS column names have
+    # changed between e.g. ``Stations-ID`` and ``stations_id`` in the past.
+    return "".join(char for char in value if char.isalnum())
 
 
 def _value(row: dict[str | None, Any], field: str) -> str | None:
@@ -189,8 +196,14 @@ class MuensterWeatherClient:
             raise MuensterWeatherDataError("Invalid CSV data") from err
 
     async def async_get_stations(self) -> list[Station]:
+        """Return stations from the registry published by the municipal WFS.
+
+        Station master data has a stable, dedicated endpoint.  In particular,
+        it must not depend on the CKAN observation resources being usable; the
+        latter have periodically contained failed generated downloads.
+        """
         stations: dict[str, Station] = {}
-        for row in await self._rows():
+        for row in await self._rows_from_url(STATIONS_URL):
             station_id = _value(row, "station_id")
             if station_id:
                 stations[station_id] = Station(
