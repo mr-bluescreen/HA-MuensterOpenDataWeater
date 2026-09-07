@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
 import logging
 from typing import Any
 import voluptuous as vol
@@ -37,9 +36,8 @@ from .const import (
     DOMAIN,
     MODE_ESTIMATE,
     MODE_STATION,
-    STALE_AFTER_MINUTES,
 )
-from .interpolation import distance_km, select_contributors
+from .interpolation import distance_km
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -129,6 +127,7 @@ class MuensterWeatherConfigFlow(ConfigFlow, domain=DOMAIN):  # type: ignore[call
         if user_input is not None:
             try:
                 stations = await self._stations()
+                _LOGGER.debug("Loaded %d station locations", len(stations))
                 nearby = sorted(
                     (
                         item
@@ -142,24 +141,13 @@ class MuensterWeatherConfigFlow(ConfigFlow, domain=DOMAIN):  # type: ignore[call
                         latitude, longitude, item.latitude, item.longitude
                     ),
                 )[: int(user_input[CONF_MAX_STATIONS])]
+                _LOGGER.debug(
+                    "%d stations are within the configured %s km radius",
+                    len(nearby),
+                    user_input[CONF_RADIUS_KM],
+                )
                 if not nearby:
-                    errors["base"] = "no_nearby_stations"
-                else:
-                    measurements = await MuensterWeatherClient(
-                        async_get_clientsession(self.hass)
-                    ).async_get_latest([item.station_id for item in nearby])
-                    contributors = select_contributors(
-                        nearby,
-                        measurements,
-                        latitude,
-                        longitude,
-                        float(user_input[CONF_RADIUS_KM]),
-                        int(user_input[CONF_MAX_STATIONS]),
-                        datetime.now(UTC),
-                        timedelta(minutes=STALE_AFTER_MINUTES),
-                    )
-                    if not contributors:
-                        errors["base"] = "no_usable_measurements"
+                    errors["base"] = "no_stations_in_radius"
             except MuensterWeatherConnectionError:
                 errors["base"] = "cannot_connect"
             except MuensterWeatherNoStationsError:

@@ -1,6 +1,5 @@
 """Config-flow regressions with lightweight Home Assistant protocol doubles."""
 
-from datetime import UTC, datetime
 import importlib.util
 from pathlib import Path
 import sys
@@ -117,29 +116,22 @@ class ConfigFlowRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["type"], "create_entry")
         self.assertEqual(result["data"][const.CONF_STATION_ID], "50618")
 
-    async def test_estimate_submit_validates_current_measurements_and_creates_entry(self):
+    async def test_estimate_submit_creates_entry_without_transient_measurement(self):
         station = api.Station("50618", "Zentrum", 51.962, 7.626)
-        measurement = api.Measurement(
-            "50618", datetime.now(UTC), 20.4, 61.0, None, True, True
-        )
         self.flow._stations = AsyncMock(return_value=[station])
-        client = types.SimpleNamespace(
-            async_get_latest=AsyncMock(return_value={"50618": measurement})
-        )
-        flow_module.MuensterWeatherClient = lambda session: client
 
         result = await self.flow.async_step_estimate(
             {const.CONF_RADIUS_KM: 5.0, const.CONF_MAX_STATIONS: 5}
         )
         self.assertEqual(result["type"], "create_entry")
-        client.async_get_latest.assert_awaited_once_with(["50618"])
+        self.assertEqual(result["data"][const.CONF_RADIUS_KM], 5.0)
 
     async def test_estimate_errors_are_distinct(self):
         self.flow._stations = AsyncMock(return_value=[api.Station("far", "Far", 0, 0)])
         result = await self.flow.async_step_estimate(
             {const.CONF_RADIUS_KM: 0.5, const.CONF_MAX_STATIONS: 1}
         )
-        self.assertEqual(result["errors"]["base"], "no_nearby_stations")
+        self.assertEqual(result["errors"]["base"], "no_stations_in_radius")
 
         for exception, expected in (
             (api.MuensterWeatherConnectionError(), "cannot_connect"),
@@ -150,16 +142,3 @@ class ConfigFlowRegressionTests(unittest.IsolatedAsyncioTestCase):
                 {const.CONF_RADIUS_KM: 5.0, const.CONF_MAX_STATIONS: 1}
             )
             self.assertEqual(result["errors"]["base"], expected)
-
-        station = api.Station("50618", "Zentrum", 51.962, 7.626)
-        self.flow._stations = AsyncMock(return_value=[station])
-        client = types.SimpleNamespace(
-            async_get_latest=AsyncMock(
-                side_effect=api.MuensterWeatherConnectionError()
-            )
-        )
-        flow_module.MuensterWeatherClient = lambda session: client
-        result = await self.flow.async_step_estimate(
-            {const.CONF_RADIUS_KM: 5.0, const.CONF_MAX_STATIONS: 1}
-        )
-        self.assertEqual(result["errors"]["base"], "cannot_connect")

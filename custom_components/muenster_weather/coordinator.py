@@ -11,7 +11,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryError
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
-from .api import Measurement, MuensterWeatherClient, MuensterWeatherError, Station
+from .api import CurrentMeasurement, MuensterWeatherClient, MuensterWeatherError, Station
 from .const import (
     CONF_LATITUDE,
     CONF_LONGITUDE,
@@ -37,7 +37,7 @@ _LOGGER = logging.getLogger(__name__)
 
 @dataclass(frozen=True, slots=True)
 class CoordinatorData:
-    measurement: Measurement | None
+    measurement: CurrentMeasurement | None
     estimate: Estimate | None
     contributors: tuple[Contributor, ...]
 
@@ -82,10 +82,18 @@ class MuensterWeatherCoordinator(DataUpdateCoordinator[CoordinatorData]):
                 assert self.station is not None
                 values = await self.client.async_get_latest([self.station.station_id])
                 measurement = values.get(self.station.station_id)
+                if measurement is None:
+                    _LOGGER.debug(
+                        "Current response does not contain requested station %s",
+                        self.station.station_id,
+                    )
                 if measurement is not None and datetime.now(
                     UTC
                 ) - measurement.observed_at > timedelta(minutes=STALE_AFTER_MINUTES):
                     measurement = None
+                    _LOGGER.debug(
+                        "Current measurement for %s is stale", self.station.station_id
+                    )
                 return CoordinatorData(measurement, None, ())
             latitude = float(
                 self.config_entry.options.get(
@@ -120,6 +128,7 @@ class MuensterWeatherCoordinator(DataUpdateCoordinator[CoordinatorData]):
                 <= radius
             ][:maximum]
             values = await self.client.async_get_latest(ids) if ids else {}
+            _LOGGER.debug("Received %d measurement records", len(values))
             contributors = select_contributors(
                 self.stations,
                 values,
@@ -129,6 +138,11 @@ class MuensterWeatherCoordinator(DataUpdateCoordinator[CoordinatorData]):
                 maximum,
                 datetime.now(UTC),
                 timedelta(minutes=STALE_AFTER_MINUTES),
+            )
+            _LOGGER.debug(
+                "%d temperature values and %d humidity values are usable",
+                sum(item.measurement.temperature is not None for item in contributors),
+                sum(item.measurement.humidity is not None for item in contributors),
             )
             return CoordinatorData(None, interpolate(contributors), contributors)
         except MuensterWeatherError as err:
