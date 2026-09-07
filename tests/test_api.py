@@ -1,10 +1,12 @@
 """Parser contract tests using captured representative WFS shapes."""
 
 from datetime import UTC
+import asyncio
 import importlib.util
 from pathlib import Path
 import sys
 import types
+from unittest.mock import AsyncMock
 import pytest
 
 aiohttp = types.ModuleType("aiohttp")
@@ -26,35 +28,60 @@ api = sys.modules[f"{pkg.__name__}.api"]
 geo = sys.modules[f"{pkg.__name__}.interpolation"]
 
 
-def test_geojson_coordinate_order_and_station_sorting():
+def test_current_station_master_csv_fields_and_coordinate_order():
+    """Regression fixture matching the WFS ``CSV_STAMMDATEN`` resource."""
     stations = api.parse_stations(
-        {
-            "features": [
-                {
-                    "properties": {"device_id": 50618, "name": "Zentrum"},
-                    "geometry": {"coordinates": [7.626, 51.962]},
-                },
-                {
-                    "properties": {
-                        "device_id": "2",
-                        "name": "Aasee",
-                        "latitude": 51.95,
-                        "longitude": 7.61,
-                    }
-                },
-            ]
-        }
+        "device_id;description;latitude;longitude;optional\n"
+        "50618;Zentrum;51,962;7,626;\n"
+        "2;Aasee;51,950;7,610;\n"
     )
     assert stations[0].name == "Aasee"
+    assert stations[1].station_id == "50618"
+    assert stations[1].name == "Zentrum"
     assert stations[1].latitude == 51.962
     assert stations[1].longitude == 7.626
 
 
-def test_invalid_station_payloads():
+def test_station_optional_names_duplicates_and_bad_rows():
+    stations = api.parse_stations(
+        [
+            {"device_id": 7, "description": None, "latitude": 51.9, "longitude": 7.6},
+            {"device_id": "7", "latitude": 51.91, "longitude": 7.61},
+            {"device_id": "bad", "description": "Broken", "latitude": "?", "longitude": 7.6},
+            "not an object",
+        ]
+    )
+    assert stations == [api.Station("7", "7", 51.91, 7.61)]
+
+
+def test_empty_and_malformed_station_payloads():
+    with pytest.raises(api.MuensterWeatherNoStationsError):
+        api.parse_stations([])
+    with pytest.raises(api.MuensterWeatherNoStationsError):
+        api.parse_stations("device_id;description;latitude;longitude\n")
     with pytest.raises(api.MuensterWeatherResponseError):
         api.parse_stations({"type": "FeatureCollection"})
-    with pytest.raises(api.MuensterWeatherResponseError):
+    with pytest.raises(api.MuensterWeatherNoStationsError):
         api.parse_stations({"features": [{"properties": {"name": "missing id"}}]})
+
+
+def test_geojson_coordinate_order_remains_supported():
+    station = api.parse_stations(
+        [{"properties": {"device_id": "1"}, "geometry": {"coordinates": [7.626, 51.962]}}]
+    )[0]
+    assert (station.latitude, station.longitude) == (51.962, 7.626)
+
+
+def test_station_client_requests_dedicated_master_csv():
+    client = api.MuensterWeatherClient(None)
+    client._get = AsyncMock(
+        return_value="device_id;description;latitude;longitude\n1;Aasee;51,95;7,61\n"
+    )
+    stations = asyncio.run(client.async_get_stations())
+    assert stations[0].name == "Aasee"
+    client._get.assert_awaited_once_with(
+        sys.modules[f"{pkg.__name__}.const"].STATION_PARAMS, json=False
+    )
 
 
 def test_measurement_quality_null_range_timezone_and_newest():

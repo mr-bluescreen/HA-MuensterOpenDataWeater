@@ -9,7 +9,9 @@ COMMON_PARAMS: Final = {"SERVICE": "WFS", "VERSION": "1.1.0", "REQUEST": "GetFea
 STATION_PARAMS: Final = {
     **COMMON_PARAMS,
     "TYPENAME": "wetterstationen",
-    "OUTPUTFORMAT": "geojson",
+    # This is the service's dedicated station registry.  The similarly named
+    # default/GeoJSON output is not the public Stadt.Temperatur master schema.
+    "OUTPUTFORMAT": "CSV_STAMMDATEN",
 }
 LATEST_PARAMS: Final = {
     **COMMON_PARAMS,

@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+import csv
 from dataclasses import dataclass
 from datetime import UTC, datetime
+import io
+import logging
 import math
 from typing import Final, TypeAlias
 
@@ -26,6 +29,10 @@ class MuensterWeatherConnectionError(MuensterWeatherError):
 
 class MuensterWeatherResponseError(MuensterWeatherError):
     """The service returned an invalid response."""
+
+
+class MuensterWeatherNoStationsError(MuensterWeatherError):
+    """A valid station registry contains no usable stations."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -52,7 +59,15 @@ class Measurement:
 
 
 _ID: Final = ("device_id", "deviceid", "stations_id", "station_id", "station", "id")
-_NAME: Final = ("name", "bezeichnung", "standort", "stationsname", "station_name")
+_NAME: Final = (
+    "description",
+    "beschreibung",
+    "name",
+    "bezeichnung",
+    "standort",
+    "stationsname",
+    "station_name",
+)
 _TIME: Final = ("timestamp", "zeitstempel", "messzeitpunkt", "datum", "time")
 _TEMP: Final = ("temperature", "temperatur", "temp", "lufttemperatur")
 _HUMIDITY: Final = (
@@ -76,6 +91,8 @@ _HUMIDITY_QUALITY: Final = (
 )
 _LAT: Final = ("latitude", "lat", "breitengrad")
 _LON: Final = ("longitude", "lon", "lng", "laengengrad")
+
+_LOGGER = logging.getLogger(__name__)
 
 
 def _key(value: str) -> str:
@@ -172,13 +189,26 @@ def _timestamp(value: object) -> datetime:
 
 
 def parse_stations(payload: object) -> list[Station]:
-    """Parse GeoJSON station master data (coordinates are longitude, latitude)."""
+    """Parse the station registry CSV, with GeoJSON support for compatibility."""
+    if isinstance(payload, str):
+        if not payload.strip():
+            raise MuensterWeatherNoStationsError("Station response is empty")
+        try:
+            dialect = csv.Sniffer().sniff(payload[:4096], delimiters=";,\t")
+            payload = list(csv.DictReader(io.StringIO(payload), dialect=dialect))
+        except csv.Error as err:
+            raise MuensterWeatherResponseError("Station response is invalid CSV") from err
     features = payload.get("features") if isinstance(payload, Mapping) else payload
     if not isinstance(features, list):
         raise MuensterWeatherResponseError("Station response has no feature list")
+    _LOGGER.debug("Station metadata contains %d raw records", len(features))
     stations: dict[str, Station] = {}
     for feature in features:
-        properties, coordinates = _properties(feature)
+        try:
+            properties, coordinates = _properties(feature)
+        except MuensterWeatherResponseError as err:
+            _LOGGER.debug("Skipping malformed station record: %s", err)
+            continue
         identifier = _get(properties, _ID)
         longitude = _number(
             coordinates[0]
@@ -195,8 +225,13 @@ def parse_stations(payload: object) -> list[Station]:
             maximum=90,
         )
         if identifier is None or latitude is None or longitude is None:
+            _LOGGER.debug(
+                "Skipping station record with missing ID or malformed coordinates"
+            )
             continue
         station_id = str(identifier).strip()
+        if not station_id:
+            continue
         stations[station_id] = Station(
             station_id,
             str(_get(properties, _NAME) or station_id).strip(),
@@ -204,7 +239,7 @@ def parse_stations(payload: object) -> list[Station]:
             longitude,
         )
     if not stations:
-        raise MuensterWeatherResponseError(
+        raise MuensterWeatherNoStationsError(
             "Station response contains no usable stations"
         )
     return sorted(
@@ -257,18 +292,32 @@ class MuensterWeatherClient:
     def __init__(self, session: ClientSession) -> None:
         self._session = session
 
-    async def _get(self, params: Mapping[str, str]) -> object:
+    async def _get(self, params: Mapping[str, str], *, json: bool = True) -> object:
         try:
             async with self._session.get(API_URL, params=params) as response:
+                _LOGGER.debug("Requesting Münster weather resource: %s", response.url)
                 response.raise_for_status()
-                return await response.json(content_type=None)
+                _LOGGER.debug(
+                    "Received Münster weather response: status=%s content_type=%s",
+                    response.status,
+                    response.content_type,
+                )
+                return (
+                    await response.json(content_type=None)
+                    if json
+                    else await response.text()
+                )
         except (ClientError, TimeoutError) as err:
             raise MuensterWeatherConnectionError from err
         except (ValueError, TypeError) as err:
             raise MuensterWeatherResponseError("Response is not valid JSON") from err
 
     async def async_get_stations(self) -> list[Station]:
-        return parse_stations(await self._get(STATION_PARAMS))
+        payload = await self._get(STATION_PARAMS, json=False)
+        _LOGGER.debug("Station metadata top-level response type: %s", type(payload).__name__)
+        stations = parse_stations(payload)
+        _LOGGER.debug("Successfully parsed %d stations", len(stations))
+        return stations
 
     async def async_get_latest(
         self, station_ids: Sequence[str]
