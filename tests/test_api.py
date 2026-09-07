@@ -1,159 +1,157 @@
-"""Tests for the portal data normalisation."""
+"""Parser contract tests using captured representative WFS shapes."""
+
+from datetime import UTC
 import importlib.util
 from pathlib import Path
 import sys
 import types
-import unittest
-from unittest.mock import AsyncMock
+import pytest
 
-# Load the transport module without importing optional runtime dependencies.
 aiohttp = types.ModuleType("aiohttp")
-aiohttp.ClientError = type("ClientError", (Exception,), {})
+for n in ("ClientError", "ClientResponseError"):
+    setattr(aiohttp, n, type(n, (Exception,), {}))
 aiohttp.ClientSession = type("ClientSession", (), {})
 sys.modules["aiohttp"] = aiohttp
-
-# Load the transport module without importing the Home Assistant-dependent package root.
-PACKAGE = "custom_components.muenster_weather"
-package = types.ModuleType(PACKAGE)
-package.__path__ = [str(Path(__file__).parents[1] / "custom_components/muenster_weather")]
-sys.modules[PACKAGE] = package
-for module_name in ("const", "api"):
-    path = Path(package.__path__[0]) / f"{module_name}.py"
-    spec = importlib.util.spec_from_file_location(f"{PACKAGE}.{module_name}", path)
+pkg = types.ModuleType("custom_components.muenster_weather")
+pkg.__path__ = [str(Path(__file__).parents[1] / "custom_components/muenster_weather")]
+sys.modules[pkg.__name__] = pkg
+for name in ("const", "api", "interpolation"):
+    spec = importlib.util.spec_from_file_location(
+        f"{pkg.__name__}.{name}", Path(pkg.__path__[0]) / f"{name}.py"
+    )
     module = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
-MuensterWeatherClient = sys.modules[f"{PACKAGE}.api"].MuensterWeatherClient
-MuensterWeatherDataError = sys.modules[f"{PACKAGE}.api"].MuensterWeatherDataError
-STATIONS_URL = sys.modules[f"{PACKAGE}.const"].STATIONS_URL
+api = sys.modules[f"{pkg.__name__}.api"]
+geo = sys.modules[f"{pkg.__name__}.interpolation"]
 
 
-class TestApi(unittest.IsolatedAsyncioTestCase):
-    async def test_station_registry_uses_dedicated_wfs_csv(self):
-        client = MuensterWeatherClient(None)
-        client._request = AsyncMock(
-            return_value="Station;Standort\n1;Aasee\n",
-        )
+def test_geojson_coordinate_order_and_station_sorting():
+    stations = api.parse_stations(
+        {
+            "features": [
+                {
+                    "properties": {"device_id": 50618, "name": "Zentrum"},
+                    "geometry": {"coordinates": [7.626, 51.962]},
+                },
+                {
+                    "properties": {
+                        "device_id": "2",
+                        "name": "Aasee",
+                        "latitude": 51.95,
+                        "longitude": 7.61,
+                    }
+                },
+            ]
+        }
+    )
+    assert stations[0].name == "Aasee"
+    assert stations[1].latitude == 51.962
+    assert stations[1].longitude == 7.626
 
-        stations = await client.async_get_stations()
 
-        self.assertEqual([station.station_id for station in stations], ["1"])
-        client._request.assert_awaited_once_with(STATIONS_URL)
+def test_invalid_station_payloads():
+    with pytest.raises(api.MuensterWeatherResponseError):
+        api.parse_stations({"type": "FeatureCollection"})
+    with pytest.raises(api.MuensterWeatherResponseError):
+        api.parse_stations({"features": [{"properties": {"name": "missing id"}}]})
 
-    async def test_station_registry_accepts_punctuated_wfs_headers(self):
-        client = MuensterWeatherClient(None)
-        client._request = AsyncMock(
-            return_value=(
-                "Stations-ID;Bezeichnung;Breitengrad;Längengrad\n"
-                "17;Coerde;51,99;7,64\n"
-            )
-        )
 
-        stations = await client.async_get_stations()
+def test_measurement_quality_null_range_timezone_and_newest():
+    payload = [
+        {
+            "device_id": "1",
+            "timestamp": "2026-08-01T12:00:00+02:00",
+            "temperature": 19,
+            "humidity": 101,
+        },
+        {
+            "device_id": "1",
+            "timestamp": "2026-08-01T12:15:00+02:00",
+            "temperature": 20.5,
+            "humidity": 55,
+            "temperature_quality": "bad",
+            "humidity_quality": 0,
+            "heat_notification": "none",
+        },
+        {
+            "device_id": "2",
+            "timestamp": "2026-01-01T12:00:00",
+            "temperature": None,
+            "humidity": "x",
+        },
+    ]
+    values = api.parse_measurements(payload)
+    assert values["1"].temperature is None and values["1"].humidity == 55
+    assert values["1"].observed_at.tzinfo is UTC and values["1"].observed_at.hour == 10
+    assert values["2"].observed_at.hour == 11 and values["2"].humidity is None
 
-        self.assertEqual(stations[0].station_id, "17")
-        self.assertEqual(stations[0].name, "Coerde")
-        self.assertEqual(stations[0].latitude, 51.99)
-        self.assertEqual(stations[0].longitude, 7.64)
 
-    async def test_resource_list_response_exposes_resources(self):
-        client = MuensterWeatherClient(None)
-        client._request = AsyncMock(
-            return_value={
-                "result": [
-                    {"format": "CSV", "url": "https://example.test/weather.csv"},
-                    "invalid resource",
-                ]
-            }
-        )
+def test_malformed_measurements():
+    with pytest.raises(api.MuensterWeatherResponseError):
+        api.parse_measurements({"error": "bad"})
+    with pytest.raises(api.MuensterWeatherResponseError):
+        api.parse_measurements([{"device_id": "1", "timestamp": "not-a-time"}])
 
-        urls = await client._resource_urls()
 
-        self.assertEqual(urls, ["https://example.test/weather.csv"])
+def measurement(i, temp, humidity, minute=0):
+    from datetime import datetime
 
-    async def test_invalid_metadata_raises_data_error(self):
-        client = MuensterWeatherClient(None)
-        client._request = AsyncMock(return_value={"result": "invalid"})
+    return api.Measurement(
+        i,
+        datetime(2026, 1, 1, 12, minute, tzinfo=UTC),
+        temp,
+        humidity,
+        None,
+        True,
+        True,
+    )
 
-        with self.assertRaises(MuensterWeatherDataError):
-            await client._resource_urls()
 
-    async def test_broken_latest_resource_falls_back_to_previous_resource(self):
-        client = MuensterWeatherClient(None)
-        client._request = AsyncMock(side_effect=[
-            {
-                "result": {
-                    "resources": [
-                        {"format": "CSV", "url": "https://example.test/working.csv"},
-                        {"format": "CSV", "url": "https://example.test/broken.csv"},
-                    ]
-                }
-            },
-            "failed to download zipball",
-            "Station;Standort;Temperatur\n1;Aasee;19,5\n",
-        ])
+def test_distance_zero_and_known_pair():
+    assert geo.distance_km(51.96, 7.63, 51.96, 7.63) == 0
+    assert geo.distance_km(51.96, 7.63, 52.96, 7.63) == pytest.approx(111.2, rel=0.01)
 
-        rows = await client._rows()
 
-        self.assertEqual(rows[0]["Station"], "1")
-        self.assertEqual(client._data_url, "https://example.test/working.csv")
-        self.assertEqual(client._request.await_count, 3)
+def test_selection_radius_stale_and_limit():
+    from datetime import datetime, timedelta
 
-    async def test_stations_are_deduplicated_and_sorted(self):
-        client = MuensterWeatherClient(None)
-        client._rows_from_url = AsyncMock(return_value=[
-            {"Station": "2", "Standort": "Zentrum"},
-            {"Station": "1", "Standort": "Aasee"},
-            {"Station": "1", "Standort": "Aasee"},
-        ])
-        stations = await client.async_get_stations()
-        self.assertEqual([station.station_id for station in stations], ["1", "2"])
+    stations = [
+        api.Station("a", "A", 51.96, 7.63),
+        api.Station("b", "B", 51.97, 7.63),
+        api.Station("old", "Old", 51.96, 7.63),
+    ]
+    values = {
+        "a": measurement("a", 10, 40),
+        "b": measurement("b", 20, 60, minute=15),
+        "old": measurement("old", 99, 99, minute=0),
+    }
+    selected = geo.select_contributors(
+        stations,
+        values,
+        51.96,
+        7.63,
+        2,
+        2,
+        datetime(2026, 1, 1, 12, 30, tzinfo=UTC),
+        timedelta(minutes=20),
+    )
+    assert [x.station.station_id for x in selected] == ["b"]
 
-    async def test_surplus_csv_columns_do_not_break_station_loading(self):
-        client = MuensterWeatherClient(None)
-        client._rows_from_url = AsyncMock(return_value=[
-            {"Station": "1", "Standort": "Aasee", None: ["unexpected"]}
-        ])
 
-        stations = await client.async_get_stations()
+def test_interpolation_exact_equal_weight_and_partial_fields():
+    a = geo.Contributor(api.Station("a", "A", 0, 0), measurement("a", 10, None), 1)
+    b = geo.Contributor(api.Station("b", "B", 0, 0), measurement("b", 20, 60), 1)
+    result = geo.interpolate([a, b])
+    assert result.temperature == 15
+    assert result.humidity == 60
+    exact = geo.Contributor(api.Station("x", "X", 0, 0), measurement("x", 7, 44), 0)
+    assert geo.interpolate([exact, b]).temperature == 7
 
-        self.assertEqual(stations[0].station_id, "1")
-        self.assertEqual(stations[0].name, "Aasee")
 
-    async def test_latest_observation_is_normalised(self):
-        client = MuensterWeatherClient(None)
-        client._rows = AsyncMock(return_value=[
-            {"Station": "1", "Temperatur": "18,4"},
-            {"Station": "1", "Temperatur": "19,5", "Luftfeuchtigkeit": "72", "Luftdruck": "1012.3"},
-        ])
-        observation = await client.async_get_observation("1")
-        self.assertEqual(observation["temperature"], 19.5)
-        self.assertEqual(observation["humidity"], 72)
-        self.assertEqual(observation["pressure"], 1012.3)
-        self.assertIsNone(observation["wind_speed"])
-
-    async def test_distance_weighted_average_uses_nearby_stations(self):
-        client = MuensterWeatherClient(None)
-        client._rows = AsyncMock(return_value=[
-            {"Station": "near", "Standort": "Nah", "Breitengrad": "51,9600", "Längengrad": "7,6300", "Temperatur": "10", "Windrichtung": "350"},
-            {"Station": "far", "Standort": "Fern", "Breitengrad": "51,9600", "Längengrad": "7,6600", "Temperatur": "20", "Windrichtung": "10"},
-            {"Station": "outside", "Breitengrad": "52,1000", "Längengrad": "7,6300", "Temperatur": "99"},
-        ])
-
-        observation = await client.async_get_averaged_observation(51.96, 7.63, 5, 2)
-
-        self.assertLess(observation["temperature"], 11)
-        self.assertTrue(observation["wind_bearing"] < 10 or observation["wind_bearing"] > 350)
-        self.assertEqual([item["station_id"] for item in observation["stations"]], ["near", "far"])
-
-    async def test_average_limits_number_of_stations(self):
-        client = MuensterWeatherClient(None)
-        client._rows = AsyncMock(return_value=[
-            {"Station": "one", "lat": "51.96", "lon": "7.63", "Temperatur": "12"},
-            {"Station": "two", "lat": "51.97", "lon": "7.63", "Temperatur": "24"},
-        ])
-
-        observation = await client.async_get_averaged_observation(51.96, 7.63, 10, 1)
-
-        self.assertEqual(observation["temperature"], 12)
-        self.assertEqual(len(observation["stations"]), 1)
+def test_idw_near_station_dominates_and_empty_unavailable():
+    near = geo.Contributor(api.Station("n", "N", 0, 0), measurement("n", 10, 40), 0.1)
+    far = geo.Contributor(api.Station("f", "F", 0, 0), measurement("f", 30, 80), 2)
+    assert geo.interpolate([near, far]).temperature < 10.1
+    result = geo.interpolate([])
+    assert result.temperature is None and result.humidity is None

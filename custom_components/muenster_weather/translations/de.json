@@ -1,19 +1,12 @@
 {
   "title": "Münster Open-Data-Wetter",
-  "config": {
-    "step": {
-      "user": {"title": "Wetterquelle auswählen", "menu_options": {"station": "Einzelne Station auswählen", "automatic": "Lokalen Mittelwert berechnen"}},
-      "station": {"title": "Wetterstation auswählen", "description": "Wähle eine der von der Stadt Münster veröffentlichten Stationen aus.", "data": {"station_id": "Wetterstation"}},
-      "automatic": {"title": "Lokalen Mittelwert berechnen", "description": "Verwendet den Home-Assistant-Standort ({latitude}, {longitude}). Die nächstgelegenen Stationen im Radius werden invers zur Entfernung gewichtet.", "data": {"radius_km": "Maximaler Radius (km)", "max_stations": "Maximale Anzahl Stationen"}}
-    },
-    "error": {"cannot_connect": "Verbindung zum Open-Data-Portal Münster fehlgeschlagen", "invalid_data": "Das Portal liefert derzeit keine nutzbaren Wetterstationsdaten. Bitte versuche es später erneut", "station_unavailable": "Die ausgewählte Station ist nicht mehr verfügbar", "no_nearby_stations": "In diesem Radius wurde keine Station mit Koordinaten gefunden", "unknown": "Ein unerwarteter Fehler ist aufgetreten. Details wurden in das Home-Assistant-Protokoll geschrieben"},
-    "abort": {"already_configured": "Diese Wetterquelle ist bereits eingerichtet"}
-  },
-  "entity": {
-    "sensor": {
-      "temperature": {"name": "Temperatur"}, "humidity": {"name": "Luftfeuchtigkeit"}, "pressure": {"name": "Luftdruck"},
-      "wind_speed": {"name": "Windgeschwindigkeit"}, "precipitation": {"name": "Niederschlag"}, "illuminance": {"name": "Beleuchtungsstärke"}
-    },
-    "weather": {"current": {"name": "Aktuelles Wetter"}}
-  }
+  "config": {"step": {
+    "user": {"title": "Wetterquelle auswählen", "menu_options": {"station": "Einzelne Wetterstation", "estimate": "Lokale Wetterschätzung"}},
+    "station": {"title": "Wetterstation auswählen", "data": {"station_id": "Wetterstation"}},
+    "estimate": {"title": "Lokale Wetterschätzung", "description": "Schätzt das Wetter am Home-Assistant-Standort nahe {latitude}, {longitude}. Die Koordinaten werden ausschließlich lokal verarbeitet.", "data": {"radius_km": "Suchradius", "max_stations": "Höchstzahl der Stationen"}}
+  }, "error": {"cannot_connect": "Keine Verbindung zum Dienst der Stadt Münster möglich", "invalid_data": "Der Dienst hat ungültige Daten geliefert", "station_unavailable": "Die gewählte Station ist nicht mehr verfügbar", "no_nearby_stations": "In diesem Radius wurde keine Station gefunden"}, "abort": {"already_configured": "Diese Wetterquelle ist bereits eingerichtet"}},
+  "options": {"step": {"init": {"title": "Einstellungen der lokalen Schätzung", "data": {"radius_km": "Suchradius", "max_stations": "Höchstzahl der Stationen"}}}, "abort": {"no_options": "Für eine einzelne Station gibt es keine einstellbaren Optionen"}},
+  "entity": {"sensor": {"temperature": {"name": "Temperatur"}, "humidity": {"name": "Luftfeuchtigkeit"}, "heat_status": {"name": "Hitzestatus"}, "observed_at": {"name": "Messzeitpunkt"}, "station_count": {"name": "Beitragende Stationen"}, "nearest_distance": {"name": "Entfernung zur nächsten Station"}}},
+  "exceptions": {"update_failed": {"message": "Die aktuellen Messwerte konnten nicht aktualisiert werden"}, "station_removed": {"message": "Die konfigurierte Wetterstation ist nicht mehr in den Stammdaten vorhanden"}},
+  "issues": {"station_removed": {"title": "Wetterstation entfernt", "description": "Station {station_id} ist nicht mehr in der Stationsliste der Stadt Münster enthalten. Entferne diesen Integrationseintrag oder wähle eine andere Station."}}
 }
