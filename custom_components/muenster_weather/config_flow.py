@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
+import logging
 from typing import Any
 import voluptuous as vol
 
@@ -19,6 +21,7 @@ from .api import (
     MuensterWeatherClient,
     MuensterWeatherConnectionError,
     MuensterWeatherError,
+    MuensterWeatherNoStationsError,
     Station,
 )
 from .const import (
@@ -34,8 +37,11 @@ from .const import (
     DOMAIN,
     MODE_ESTIMATE,
     MODE_STATION,
+    STALE_AFTER_MINUTES,
 )
-from .interpolation import distance_km
+from .interpolation import distance_km, select_contributors
+
+_LOGGER = logging.getLogger(__name__)
 
 
 class MuensterWeatherConfigFlow(ConfigFlow, domain=DOMAIN):  # type: ignore[call-arg]
@@ -64,8 +70,15 @@ class MuensterWeatherConfigFlow(ConfigFlow, domain=DOMAIN):  # type: ignore[call
         except MuensterWeatherConnectionError:
             errors["base"] = "cannot_connect"
             stations = []
+        except MuensterWeatherNoStationsError:
+            errors["base"] = "no_stations"
+            stations = []
         except MuensterWeatherError:
             errors["base"] = "invalid_data"
+            stations = []
+        except Exception:  # noqa: BLE001 - expose bugs as unknown, never bad data
+            _LOGGER.exception("Unexpected error while loading weather stations")
+            errors["base"] = "unknown"
             stations = []
         if user_input is not None and not errors:
             station = next(
@@ -116,16 +129,46 @@ class MuensterWeatherConfigFlow(ConfigFlow, domain=DOMAIN):  # type: ignore[call
         if user_input is not None:
             try:
                 stations = await self._stations()
-                if not any(
-                    distance_km(latitude, longitude, item.latitude, item.longitude)
-                    <= user_input[CONF_RADIUS_KM]
-                    for item in stations
-                ):
+                nearby = sorted(
+                    (
+                        item
+                        for item in stations
+                        if distance_km(
+                            latitude, longitude, item.latitude, item.longitude
+                        )
+                        <= user_input[CONF_RADIUS_KM]
+                    ),
+                    key=lambda item: distance_km(
+                        latitude, longitude, item.latitude, item.longitude
+                    ),
+                )[: int(user_input[CONF_MAX_STATIONS])]
+                if not nearby:
                     errors["base"] = "no_nearby_stations"
+                else:
+                    measurements = await MuensterWeatherClient(
+                        async_get_clientsession(self.hass)
+                    ).async_get_latest([item.station_id for item in nearby])
+                    contributors = select_contributors(
+                        nearby,
+                        measurements,
+                        latitude,
+                        longitude,
+                        float(user_input[CONF_RADIUS_KM]),
+                        int(user_input[CONF_MAX_STATIONS]),
+                        datetime.now(UTC),
+                        timedelta(minutes=STALE_AFTER_MINUTES),
+                    )
+                    if not contributors:
+                        errors["base"] = "no_usable_measurements"
             except MuensterWeatherConnectionError:
                 errors["base"] = "cannot_connect"
+            except MuensterWeatherNoStationsError:
+                errors["base"] = "no_stations"
             except MuensterWeatherError:
                 errors["base"] = "invalid_data"
+            except Exception:  # noqa: BLE001 - expose bugs as unknown, never bad data
+                _LOGGER.exception("Unexpected error while validating local estimate")
+                errors["base"] = "unknown"
             if not errors:
                 await self.async_set_unique_id("local_estimate")
                 self._abort_if_unique_id_configured()

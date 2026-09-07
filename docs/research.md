@@ -10,14 +10,28 @@ Both calls use `https://geo.stadt-muenster.de/mapserv/wetterstationen_serv` with
 
 | Purpose | `TYPENAME` | `OUTPUTFORMAT` | Filtering |
 |---|---|---|---|
-| master data | `wetterstationen` | `geojson` | none |
+| master data | `wetterstationen` | `CSV_STAMMDATEN` | none |
 | latest values | `wetterstationen_aktuell` | `JSON_AKTUELL` | optional comma-separated `device_ids` |
 
 Historical, WMS, and date-range resources are not used because Home Assistant only needs current observations. This avoids CKAN discovery and prevents historical downloads during polling.
 
 ## Relevant schema contract
 
-Master data is interpreted as a GeoJSON FeatureCollection. The stable station ID is represented as `device_id` (numeric IDs are normalised to strings); station labels are read from `name`/`bezeichnung`/`standort`; Point coordinates are interpreted in mandatory GeoJSON order **longitude, latitude**. Explicit latitude/longitude properties are accepted as a resilient fallback. Invalid or ungeolocated features are ignored.
+The dedicated master-data representation is semicolon-delimited CSV. Its
+station ID, description, latitude, and longitude columns are normalised across
+the punctuation and German/English headings the endpoint has used. Decimal
+commas are supported. Numeric IDs are normalised to strings, an absent optional
+description falls back to the stable ID, duplicates resolve to one station, and
+isolated malformed/ungeolocated rows are skipped. GeoJSON remains accepted as a
+compatibility representation; Point coordinates are then interpreted in
+mandatory GeoJSON order **longitude, latitude**.
+
+The blocking regression was introduced by requesting `OUTPUTFORMAT=geojson`
+and unconditionally parsing the response as JSON. The station service's
+dedicated public master-data format is `CSV_STAMMDATEN`, so JSON decoding failed
+before either setup mode had usable station metadata. Both modes shared that
+failure: station mode failed while constructing its selector, while estimate
+mode failed after submission when it first attempted station discovery.
 
 Latest output is accepted as a JSON list, a GeoJSON `features` list, or an object containing `data`/`records`. Relevant properties are: station/device ID, timestamp, temperature in °C, relative humidity in %, heat notification/status, and per-field temperature/humidity quality. Null, empty, non-finite, malformed, out-of-range values are `None`. Unknown JSON fields are ignored. Duplicate station records resolve to the newest timestamp.
 
