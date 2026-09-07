@@ -182,3 +182,35 @@ def test_idw_near_station_dominates_and_empty_unavailable():
     assert geo.interpolate([near, far]).temperature < 10.1
     result = geo.interpolate([])
     assert result.temperature is None and result.humidity is None
+
+
+def test_current_indexed_shape_and_id_normalisation():
+    """JSON_AKTUELL may index objects by numeric-looking public device IDs."""
+    payload = {
+        "50618": {
+            "timestamp": "2026-09-07T09:30:00+02:00",
+            "air_temperature": 21.3,
+            "relative_humidity": None,
+            "temperature_quality": 0,
+            "humidity_quality": 0,
+            "heat_notification": "keine",
+        }
+    }
+    current = api.parse_measurements(payload)["50618"]
+    assert isinstance(current, api.CurrentMeasurement)
+    assert current.station_id == "50618"
+    assert current.temperature == 21.3
+    assert current.humidity is None
+    assert current.observed_at.isoformat() == "2026-09-07T07:30:00+00:00"
+
+
+def test_numeric_measurement_id_matches_string_station_id():
+    current = api.parse_measurements(
+        [{
+            "device_id": 50618,
+            "timestamp": "2026-09-07T07:30:00Z",
+            "temperature": 20,
+            "humidity": 50,
+        }]
+    )
+    assert current["50618"].station_id == "50618"

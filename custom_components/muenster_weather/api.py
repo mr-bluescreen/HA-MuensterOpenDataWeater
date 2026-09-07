@@ -46,7 +46,7 @@ class Station:
 
 
 @dataclass(frozen=True, slots=True)
-class Measurement:
+class CurrentMeasurement:
     """One latest observation; missing and rejected values remain ``None``."""
 
     station_id: str
@@ -56,6 +56,10 @@ class Measurement:
     heat_status: str | None
     temperature_valid: bool
     humidity_valid: bool
+
+
+# Compatibility alias for the initial public release.
+Measurement = CurrentMeasurement
 
 
 _ID: Final = ("device_id", "deviceid", "stations_id", "station_id", "station", "id")
@@ -68,13 +72,24 @@ _NAME: Final = (
     "stationsname",
     "station_name",
 )
-_TIME: Final = ("timestamp", "zeitstempel", "messzeitpunkt", "datum", "time")
-_TEMP: Final = ("temperature", "temperatur", "temp", "lufttemperatur")
+_TIME: Final = (
+    "timestamp",
+    "datetime",
+    "observed_at",
+    "zeitstempel",
+    "messzeitpunkt",
+    "datum",
+    "time",
+)
+_TEMP: Final = (
+    "temperature", "air_temperature", "temperatur", "temp", "lufttemperatur"
+)
 _HUMIDITY: Final = (
     "humidity",
     "luftfeuchtigkeit",
     "relative_luftfeuchtigkeit",
     "rel_humidity",
+    "relative_humidity",
 )
 _HEAT: Final = ("heat_notification", "hitzewarnung", "hitzestatus", "heat_status")
 _TEMP_QUALITY: Final = (
@@ -248,16 +263,33 @@ def parse_stations(payload: object) -> list[Station]:
     )
 
 
-def parse_measurements(payload: object) -> dict[str, Measurement]:
-    """Parse the latest-measurement JSON/GeoJSON representation."""
-    records = (
-        payload.get("features", payload.get("data", payload.get("records")))
-        if isinstance(payload, Mapping)
-        else payload
-    )
-    if not isinstance(records, list):
+def _measurement_records(payload: object) -> list[object]:
+    """Extract records from representations emitted by ``JSON_AKTUELL``."""
+    if isinstance(payload, list):
+        return payload
+    if not isinstance(payload, Mapping):
         raise MuensterWeatherResponseError("Measurement response has no record list")
-    result: dict[str, Measurement] = {}
+    for key in (
+        "features", "data", "records", "measurements", "wetterstationen_aktuell"
+    ):
+        if isinstance(records := payload.get(key), list):
+            return records
+    indexed: list[object] = []
+    for station_id, value in payload.items():
+        if not isinstance(value, Mapping):
+            break
+        item = dict(value)
+        item.setdefault("device_id", station_id)
+        indexed.append(item)
+    if indexed and len(indexed) == len(payload):
+        return indexed
+    raise MuensterWeatherResponseError("Measurement response has no record list")
+
+
+def parse_measurements(payload: object) -> dict[str, CurrentMeasurement]:
+    """Parse current observations independently of station master data."""
+    records = _measurement_records(payload)
+    result: dict[str, CurrentMeasurement] = {}
     for record in records:
         properties, _ = _properties(record)
         identifier = _get(properties, _ID)
@@ -265,8 +297,11 @@ def parse_measurements(payload: object) -> dict[str, Measurement]:
             continue
         temperature_valid = _quality_is_valid(_get(properties, _TEMP_QUALITY))
         humidity_valid = _quality_is_valid(_get(properties, _HUMIDITY_QUALITY))
-        measurement = Measurement(
-            station_id=str(identifier).strip(),
+        station_id = str(identifier).strip()
+        if not station_id:
+            continue
+        measurement = CurrentMeasurement(
+            station_id=station_id,
             observed_at=_timestamp(_get(properties, _TIME)),
             temperature=_number(_get(properties, _TEMP), minimum=-60, maximum=70)
             if temperature_valid
@@ -321,8 +356,13 @@ class MuensterWeatherClient:
 
     async def async_get_latest(
         self, station_ids: Sequence[str]
-    ) -> dict[str, Measurement]:
+    ) -> dict[str, CurrentMeasurement]:
         params = dict(LATEST_PARAMS)
         if station_ids:
-            params["device_ids"] = ",".join(station_ids)
-        return parse_measurements(await self._get(params))
+            params["device_ids"] = ",".join(
+                str(value).strip() for value in station_ids
+            )
+        _LOGGER.debug("Requesting current measurements for station IDs %s", station_ids)
+        values = parse_measurements(await self._get(params))
+        _LOGGER.debug("Received %d current measurement records", len(values))
+        return values
