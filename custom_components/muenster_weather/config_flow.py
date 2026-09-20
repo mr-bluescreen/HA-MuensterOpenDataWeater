@@ -191,7 +191,14 @@ class MuensterWeatherConfigFlow(ConfigFlow, domain=DOMAIN):  # type: ignore[call
 
 class MuensterWeatherOptionsFlow(OptionsFlow):
     def __init__(self, config_entry: ConfigEntry) -> None:
-        self.config_entry = config_entry
+        try:
+            # Home Assistant core predating automatic config_entry association:
+            # there is no property here yet, so this just sets a plain attribute.
+            self.config_entry = config_entry
+        except AttributeError:
+            # Current Home Assistant exposes config_entry as a read-only
+            # property (resolved from self.handler); nothing more to do here.
+            pass
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None

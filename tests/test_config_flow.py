@@ -282,6 +282,35 @@ async def test_options_flow_updates_estimate_settings(
     assert result["data"][CONF_MAX_STATIONS] == 3
 
 
+async def test_options_flow_init_tolerates_read_only_config_entry_property(
+    hass: HomeAssistant, monkeypatch
+) -> None:
+    """Regression test: current Home Assistant exposes OptionsFlow.config_entry
+    as a read-only property (no setter), resolved from self.handler. Older
+    cores expose no such property at all. __init__ must not crash either way.
+    """
+    from homeassistant.config_entries import OptionsFlow as BaseOptionsFlow
+
+    from custom_components.muenster_weather.config_flow import (
+        MuensterWeatherOptionsFlow,
+    )
+
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="local_estimate",
+        data={CONF_MODE: MODE_ESTIMATE, CONF_RADIUS_KM: 5.0, CONF_MAX_STATIONS: 5},
+    )
+    monkeypatch.setattr(
+        BaseOptionsFlow,
+        "config_entry",
+        property(lambda self: entry),
+        raising=False,
+    )
+
+    flow = MuensterWeatherOptionsFlow(entry)
+    assert flow.config_entry is entry
+
+
 async def test_options_flow_unavailable_for_station_entries(hass: HomeAssistant) -> None:
     entry = MockConfigEntry(
         domain=DOMAIN,
