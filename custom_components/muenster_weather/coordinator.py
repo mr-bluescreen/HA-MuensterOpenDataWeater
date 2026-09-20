@@ -2,16 +2,21 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-import logging
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryError
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
-from .api import CurrentMeasurement, MuensterWeatherClient, MuensterWeatherError, Station
+from .api import (
+    CurrentMeasurement,
+    MuensterWeatherClient,
+    MuensterWeatherError,
+    Station,
+)
 from .const import (
     CONF_LATITUDE,
     CONF_LONGITUDE,
@@ -54,13 +59,22 @@ class MuensterWeatherCoordinator(DataUpdateCoordinator[CoordinatorData]):
         client: MuensterWeatherClient,
         stations: list[Station],
     ) -> None:
-        super().__init__(
-            hass,
-            _LOGGER,
-            name=DOMAIN,
-            config_entry=entry,
-            update_interval=timedelta(minutes=UPDATE_INTERVAL_MINUTES),
-        )
+        try:
+            super().__init__(
+                hass,
+                _LOGGER,
+                name=DOMAIN,
+                config_entry=entry,
+                update_interval=timedelta(minutes=UPDATE_INTERVAL_MINUTES),
+            )
+        except TypeError:  # Home Assistant core predating config_entry-aware coordinators
+            super().__init__(
+                hass,
+                _LOGGER,
+                name=DOMAIN,
+                update_interval=timedelta(minutes=UPDATE_INTERVAL_MINUTES),
+            )
+            self.config_entry = entry
         self.client = client
         self.stations = stations
         self.station = next(

@@ -1,17 +1,27 @@
 """Münster Open Data Weather integration."""
 
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, TypeAlias
+
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers import issue_registry as ir
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .api import MuensterWeatherClient
 from .const import CONF_MODE, CONF_STATION_ID, DOMAIN, MODE_ESTIMATE
 from .coordinator import MuensterWeatherCoordinator
 
 PLATFORMS = [Platform.SENSOR]
-type MuensterWeatherConfigEntry = ConfigEntry[MuensterWeatherCoordinator]
+
+if TYPE_CHECKING:
+    # ConfigEntry became a Generic that carries typed runtime_data. Guarded
+    # so the module still imports on Home Assistant cores where it is not.
+    MuensterWeatherConfigEntry: TypeAlias = ConfigEntry[MuensterWeatherCoordinator]
+else:
+    MuensterWeatherConfigEntry = ConfigEntry
 
 
 async def async_setup_entry(

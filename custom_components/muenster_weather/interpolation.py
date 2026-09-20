@@ -2,19 +2,19 @@
 
 from __future__ import annotations
 
+import math
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-import math
 
-from .api import Measurement, Station
+from .api import CurrentMeasurement, Station
 from .const import IDW_POWER, MINIMUM_DISTANCE_KM
 
 
 @dataclass(frozen=True, slots=True)
 class Contributor:
     station: Station
-    measurement: Measurement
+    measurement: CurrentMeasurement
     distance_km: float
 
 
@@ -43,7 +43,7 @@ def distance_km(
 
 def select_contributors(
     stations: Iterable[Station],
-    measurements: dict[str, Measurement],
+    measurements: dict[str, CurrentMeasurement],
     latitude: float,
     longitude: float,
     radius_km: float,
@@ -66,7 +66,7 @@ def select_contributors(
 
 
 def _idw(
-    contributors: Iterable[Contributor], getter: Callable[[Measurement], float | None]
+    contributors: Iterable[Contributor], getter: Callable[[CurrentMeasurement], float | None]
 ) -> tuple[float | None, tuple[Contributor, ...]]:
     valid = tuple(item for item in contributors if getter(item.measurement) is not None)
     if not valid:
