@@ -1,13 +1,13 @@
 {
   "domain": "muenster_weather",
   "name": "Münster Open Data Weather",
-  "codeowners": [],
+  "codeowners": ["@mr-bluescreen"],
   "config_flow": true,
-  "documentation": "https://github.com/Anzinger/HA-MuensterOpenDataWeater",
+  "documentation": "https://github.com/mr-bluescreen/HA-MuensterOpenDataWeater",
   "integration_type": "service",
   "iot_class": "cloud_polling",
-  "issue_tracker": "https://github.com/Anzinger/HA-MuensterOpenDataWeater/issues",
+  "issue_tracker": "https://github.com/mr-bluescreen/HA-MuensterOpenDataWeater/issues",
   "loggers": [],
   "requirements": [],
-  "version": "2.0.0"
+  "version": "2.1.0"
 }

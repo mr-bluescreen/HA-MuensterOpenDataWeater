@@ -1,144 +1,295 @@
-"""Config-flow regressions with lightweight Home Assistant protocol doubles."""
+"""Config and options flow tests using the real Home Assistant test harness."""
 
-import importlib.util
-from pathlib import Path
-import sys
-import types
-import unittest
-from unittest.mock import AsyncMock
+from __future__ import annotations
 
-ROOT = Path(__file__).parents[1] / "custom_components/muenster_weather"
+from homeassistant import config_entries
+from homeassistant.core import HomeAssistant
+from homeassistant.data_entry_flow import FlowResultType
+from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-vol = types.ModuleType("voluptuous")
-vol.Schema = lambda value: value
-vol.Required = lambda value, **kwargs: value
-sys.modules["voluptuous"] = vol
-
-ha = types.ModuleType("homeassistant")
-entries = types.ModuleType("homeassistant.config_entries")
-
-
-class _Flow:
-    def __init_subclass__(cls, **kwargs):
-        return super().__init_subclass__()
-
-    def async_show_menu(self, **kwargs):
-        return {"type": "menu", **kwargs}
-
-    def async_show_form(self, **kwargs):
-        return {"type": "form", **kwargs}
-
-    async def async_set_unique_id(self, value):
-        self.unique_id = value
-
-    def _abort_if_unique_id_configured(self):
-        return None
-
-    def async_create_entry(self, **kwargs):
-        return {"type": "create_entry", **kwargs}
-
-    def async_abort(self, **kwargs):
-        return {"type": "abort", **kwargs}
-
-
-entries.ConfigFlow = entries.OptionsFlow = _Flow
-entries.ConfigFlowResult = dict
-helpers = types.ModuleType("homeassistant.helpers")
-aiohttp_client = types.ModuleType("homeassistant.helpers.aiohttp_client")
-aiohttp_client.async_get_clientsession = lambda hass: hass.session
-selector = types.ModuleType("homeassistant.helpers.selector")
-
-
-class _Config:
-    def __init__(self, **kwargs):
-        self.__dict__.update(kwargs)
-
-
-class _Selector:
-    def __init__(self, config):
-        self.config = config
-
-
-selector.NumberSelector = selector.SelectSelector = _Selector
-selector.NumberSelectorConfig = selector.SelectSelectorConfig = _Config
-selector.SelectOptionDict = lambda **kwargs: kwargs
-sys.modules.update(
-    {
-        "homeassistant": ha,
-        "homeassistant.config_entries": entries,
-        "homeassistant.helpers": helpers,
-        "homeassistant.helpers.aiohttp_client": aiohttp_client,
-        "homeassistant.helpers.selector": selector,
-    }
+from custom_components.muenster_weather.const import (
+    CONF_MAX_STATIONS,
+    CONF_MODE,
+    CONF_RADIUS_KM,
+    CONF_STATION_ID,
+    DOMAIN,
+    MODE_ESTIMATE,
+    MODE_STATION,
+    STATION_PARAMS,
 )
 
-pkg_name = "custom_components.muenster_weather"
-pkg = sys.modules.get(pkg_name) or types.ModuleType(pkg_name)
-pkg.__path__ = [str(ROOT)]
-sys.modules[pkg_name] = pkg
-for name in ("const", "api", "interpolation", "config_flow"):
-    full_name = f"{pkg_name}.{name}"
-    if name == "config_flow":
-        sys.modules.pop(full_name, None)
-    if full_name not in sys.modules:
-        spec = importlib.util.spec_from_file_location(full_name, ROOT / f"{name}.py")
-        module = importlib.util.module_from_spec(spec)
-        sys.modules[full_name] = module
-        spec.loader.exec_module(module)
+from .fixtures import STATION_CSV
 
-api = sys.modules[f"{pkg_name}.api"]
-flow_module = sys.modules[f"{pkg_name}.config_flow"]
-const = sys.modules[f"{pkg_name}.const"]
+API_URL = "https://geo.stadt-muenster.de/mapserv/wetterstationen_serv"
 
 
-class _Hass:
-    session = object()
-    config = types.SimpleNamespace(latitude=51.962, longitude=7.626)
+def _mock_stations(aioclient_mock, csv: str = STATION_CSV) -> None:
+    aioclient_mock.get(API_URL, params=STATION_PARAMS, text=csv)
 
 
-class ConfigFlowRegressionTests(unittest.IsolatedAsyncioTestCase):
-    def setUp(self):
-        self.flow = flow_module.MuensterWeatherConfigFlow()
-        self.flow.hass = _Hass()
+async def _start_menu(hass: HomeAssistant, step: str) -> dict:
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": config_entries.SOURCE_USER}
+    )
+    assert result["type"] == FlowResultType.MENU
+    return await hass.config_entries.flow.async_configure(
+        result["flow_id"], {"next_step_id": step}
+    )
 
-    async def test_individual_mode_displays_real_station_options_and_creates_entry(self):
-        stations = [api.Station("50618", "Zentrum", 51.962, 7.626)]
-        self.flow._stations = AsyncMock(return_value=stations)
 
-        result = await self.flow.async_step_station()
-        station_selector = result["data_schema"][const.CONF_STATION_ID]
-        self.assertEqual(
-            station_selector.config.options,
-            [{"value": "50618", "label": "Zentrum (50618)"}],
-        )
+# --- Individual station -----------------------------------------------------
 
-        result = await self.flow.async_step_station({const.CONF_STATION_ID: "50618"})
-        self.assertEqual(result["type"], "create_entry")
-        self.assertEqual(result["data"][const.CONF_STATION_ID], "50618")
 
-    async def test_estimate_submit_creates_entry_without_transient_measurement(self):
-        station = api.Station("50618", "Zentrum", 51.962, 7.626)
-        self.flow._stations = AsyncMock(return_value=[station])
+async def test_station_selector_shows_name_and_id(hass: HomeAssistant, aioclient_mock) -> None:
+    _mock_stations(aioclient_mock)
+    result = await _start_menu(hass, "station")
+    options = result["data_schema"].schema[CONF_STATION_ID].config["options"]
+    assert {"value": "50618", "label": "Aasee (50618)"} in options
+    # The selector's stored value is the stable ID, never the display label.
+    assert all(len(o["value"]) < len(o["label"]) for o in options)
 
-        result = await self.flow.async_step_estimate(
-            {const.CONF_RADIUS_KM: 5.0, const.CONF_MAX_STATIONS: 5}
-        )
-        self.assertEqual(result["type"], "create_entry")
-        self.assertEqual(result["data"][const.CONF_RADIUS_KM], 5.0)
 
-    async def test_estimate_errors_are_distinct(self):
-        self.flow._stations = AsyncMock(return_value=[api.Station("far", "Far", 0, 0)])
-        result = await self.flow.async_step_estimate(
-            {const.CONF_RADIUS_KM: 0.5, const.CONF_MAX_STATIONS: 1}
-        )
-        self.assertEqual(result["errors"]["base"], "no_stations_in_radius")
+async def test_station_mode_creates_entry_with_stable_id(
+    hass: HomeAssistant, aioclient_mock
+) -> None:
+    _mock_stations(aioclient_mock)
+    result = await _start_menu(hass, "station")
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {CONF_STATION_ID: "50618"}
+    )
+    assert result["type"] == FlowResultType.CREATE_ENTRY
+    assert result["data"][CONF_MODE] == MODE_STATION
+    assert result["data"][CONF_STATION_ID] == "50618"
+    assert result["title"] == "Aasee"
 
-        for exception, expected in (
-            (api.MuensterWeatherConnectionError(), "cannot_connect"),
-            (api.MuensterWeatherResponseError(), "invalid_data"),
-        ):
-            self.flow._stations = AsyncMock(side_effect=exception)
-            result = await self.flow.async_step_estimate(
-                {const.CONF_RADIUS_KM: 5.0, const.CONF_MAX_STATIONS: 1}
-            )
-            self.assertEqual(result["errors"]["base"], expected)
+
+async def test_duplicate_physical_station_is_rejected(
+    hass: HomeAssistant, aioclient_mock
+) -> None:
+    _mock_stations(aioclient_mock)
+    MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="station:50618",
+        data={CONF_MODE: MODE_STATION, CONF_STATION_ID: "50618"},
+    ).add_to_hass(hass)
+
+    result = await _start_menu(hass, "station")
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {CONF_STATION_ID: "50618"}
+    )
+    assert result["type"] == FlowResultType.ABORT
+    assert result["reason"] == "already_configured"
+
+
+async def test_station_step_cannot_connect_error(hass: HomeAssistant, aioclient_mock) -> None:
+    aioclient_mock.get(API_URL, params=STATION_PARAMS, exc=TimeoutError())
+    result = await _start_menu(hass, "station")
+    assert result["errors"]["base"] == "cannot_connect"
+
+
+async def test_station_step_no_stations_error(hass: HomeAssistant, aioclient_mock) -> None:
+    aioclient_mock.get(API_URL, params=STATION_PARAMS, text="device_id;description;latitude;longitude\n")
+    result = await _start_menu(hass, "station")
+    assert result["errors"]["base"] == "no_stations"
+
+
+async def test_station_step_malformed_data_error(hass: HomeAssistant, aioclient_mock) -> None:
+    aioclient_mock.get(API_URL, params=STATION_PARAMS, text='{"type": "FeatureCollection"}')
+    result = await _start_menu(hass, "station")
+    assert result["errors"]["base"] == "invalid_data"
+
+
+async def test_station_step_recovers_after_temporary_failure(
+    hass: HomeAssistant, aioclient_mock
+) -> None:
+    aioclient_mock.get(API_URL, params=STATION_PARAMS, exc=TimeoutError())
+    result = await _start_menu(hass, "station")
+    assert result["errors"]["base"] == "cannot_connect"
+
+    aioclient_mock.clear_requests()
+    _mock_stations(aioclient_mock)
+    result = await hass.config_entries.flow.async_configure(result["flow_id"], None)
+    assert not result.get("errors")
+
+
+# --- Local estimate ----------------------------------------------------------
+
+
+async def test_estimate_creates_entry_with_local_coordinates(
+    hass: HomeAssistant, aioclient_mock
+) -> None:
+    _mock_stations(aioclient_mock)
+    hass.config.latitude = 51.9625
+    hass.config.longitude = 7.6256
+    result = await _start_menu(hass, "estimate")
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {CONF_RADIUS_KM: 5.0, CONF_MAX_STATIONS: 5}
+    )
+    assert result["type"] == FlowResultType.CREATE_ENTRY
+    assert result["data"][CONF_MODE] == MODE_ESTIMATE
+    assert result["data"]["latitude"] == 51.9625
+    assert result["data"]["longitude"] == 7.6256
+
+
+async def test_estimate_no_stations_in_radius(hass: HomeAssistant, aioclient_mock) -> None:
+    _mock_stations(aioclient_mock)
+    hass.config.latitude = 0.0
+    hass.config.longitude = 0.0
+    result = await _start_menu(hass, "estimate")
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {CONF_RADIUS_KM: 0.5, CONF_MAX_STATIONS: 5}
+    )
+    assert result["errors"]["base"] == "no_stations_in_radius"
+
+
+async def test_estimate_one_station_in_radius_is_sufficient(
+    hass: HomeAssistant, aioclient_mock
+) -> None:
+    aioclient_mock.get(
+        API_URL,
+        params=STATION_PARAMS,
+        text="device_id;description;latitude;longitude\n1;Solo;51.9625;7.6256\n",
+    )
+    hass.config.latitude = 51.9625
+    hass.config.longitude = 7.6256
+    result = await _start_menu(hass, "estimate")
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {CONF_RADIUS_KM: 5.0, CONF_MAX_STATIONS: 5}
+    )
+    assert result["type"] == FlowResultType.CREATE_ENTRY
+
+
+async def test_estimate_metadata_api_error(hass: HomeAssistant, aioclient_mock) -> None:
+    aioclient_mock.get(API_URL, params=STATION_PARAMS, exc=TimeoutError())
+    result = await _start_menu(hass, "estimate")
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {CONF_RADIUS_KM: 5.0, CONF_MAX_STATIONS: 5}
+    )
+    assert result["errors"]["base"] == "cannot_connect"
+
+
+async def test_estimate_only_one_entry_allowed(hass: HomeAssistant, aioclient_mock) -> None:
+    _mock_stations(aioclient_mock)
+    hass.config.latitude = 51.9625
+    hass.config.longitude = 7.6256
+    MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="local_estimate",
+        data={CONF_MODE: MODE_ESTIMATE, CONF_RADIUS_KM: 5.0, CONF_MAX_STATIONS: 5},
+    ).add_to_hass(hass)
+
+    result = await _start_menu(hass, "estimate")
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {CONF_RADIUS_KM: 5.0, CONF_MAX_STATIONS: 5}
+    )
+    assert result["type"] == FlowResultType.ABORT
+    assert result["reason"] == "already_configured"
+
+
+async def test_estimate_unexpected_error_is_reported_as_unknown(
+    hass: HomeAssistant, monkeypatch
+) -> None:
+    from custom_components.muenster_weather.api import MuensterWeatherClient
+
+    async def _boom(self):
+        raise RuntimeError("unexpected bug")
+
+    monkeypatch.setattr(MuensterWeatherClient, "async_get_stations", _boom)
+    result = await _start_menu(hass, "estimate")
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {CONF_RADIUS_KM: 5.0, CONF_MAX_STATIONS: 5}
+    )
+    assert result["errors"]["base"] == "unknown"
+
+
+async def test_station_step_unexpected_error_is_reported_as_unknown(
+    hass: HomeAssistant, monkeypatch
+) -> None:
+    from custom_components.muenster_weather.api import MuensterWeatherClient
+
+    async def _boom(self):
+        raise RuntimeError("unexpected bug")
+
+    monkeypatch.setattr(MuensterWeatherClient, "async_get_stations", _boom)
+    result = await _start_menu(hass, "station")
+    assert result["errors"]["base"] == "unknown"
+
+
+async def test_station_removed_between_render_and_submit_is_unavailable(
+    hass: HomeAssistant, aioclient_mock
+) -> None:
+    """A station present in the rendered dropdown may vanish before submit."""
+    _mock_stations(aioclient_mock)
+    result = await _start_menu(hass, "station")
+
+    aioclient_mock.clear_requests()
+    aioclient_mock.get(
+        API_URL,
+        params=STATION_PARAMS,
+        text="device_id;description;latitude;longitude\n50619;Zentrum;51.9625;7.6256\n",
+    )
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {CONF_STATION_ID: "50618"}
+    )
+    assert result["errors"]["base"] == "station_unavailable"
+
+
+async def test_estimate_recovers_after_temporary_failure(
+    hass: HomeAssistant, aioclient_mock
+) -> None:
+    aioclient_mock.get(API_URL, params=STATION_PARAMS, exc=TimeoutError())
+    result = await _start_menu(hass, "estimate")
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {CONF_RADIUS_KM: 5.0, CONF_MAX_STATIONS: 5}
+    )
+    assert result["errors"]["base"] == "cannot_connect"
+
+    aioclient_mock.clear_requests()
+    _mock_stations(aioclient_mock)
+    hass.config.latitude = 51.9625
+    hass.config.longitude = 7.6256
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {CONF_RADIUS_KM: 5.0, CONF_MAX_STATIONS: 5}
+    )
+    assert result["type"] == FlowResultType.CREATE_ENTRY
+
+
+# --- Options flow --------------------------------------------------------
+
+
+async def test_options_flow_updates_estimate_settings(
+    hass: HomeAssistant, aioclient_mock
+) -> None:
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="local_estimate",
+        data={
+            CONF_MODE: MODE_ESTIMATE,
+            "latitude": 51.9625,
+            "longitude": 7.6256,
+            CONF_RADIUS_KM: 5.0,
+            CONF_MAX_STATIONS: 5,
+        },
+    )
+    entry.add_to_hass(hass)
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {CONF_RADIUS_KM: 8.0, CONF_MAX_STATIONS: 3}
+    )
+    assert result["type"] == FlowResultType.CREATE_ENTRY
+    assert result["data"][CONF_RADIUS_KM] == 8.0
+    assert result["data"][CONF_MAX_STATIONS] == 3
+
+
+async def test_options_flow_unavailable_for_station_entries(hass: HomeAssistant) -> None:
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="station:50618",
+        data={CONF_MODE: MODE_STATION, CONF_STATION_ID: "50618"},
+    )
+    entry.add_to_hass(hass)
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    assert result["type"] == FlowResultType.ABORT
+    assert result["reason"] == "no_options"

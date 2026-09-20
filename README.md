@@ -50,8 +50,10 @@ See [`docs/research.md`](docs/research.md) for endpoint/schema research and [`qu
 ## Development
 
 ```bash
-pytest -q
-python -m compileall -q custom_components tests
+pip install pytest-homeassistant-custom-component ruff mypy
+pytest -q --cov=custom_components.muenster_weather
+ruff check custom_components tests
+mypy custom_components/muenster_weather
 ```
 
-Home Assistant itself is required to run Core config-flow/entity tests. Pure API, timestamp, coordinate, distance, quality, staleness, and interpolation contracts run without Home Assistant.
+The test suite runs on [`pytest-homeassistant-custom-component`](https://github.com/MatthewFlamm/pytest-homeassistant-custom-component) with real `hass`/`aioclient_mock`/`MockConfigEntry` fixtures rather than hand-rolled fakes, covering the API parsers, config/options flows, coordinator lifecycle (setup, staleness, outage/recovery), entities, devices, diagnostics, and the interpolation algorithm.

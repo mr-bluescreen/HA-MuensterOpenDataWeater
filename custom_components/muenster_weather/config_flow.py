@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import logging
 from typing import Any
-import voluptuous as vol
 
-from homeassistant.config_entries import ConfigFlow, ConfigFlowResult, OptionsFlow
+import voluptuous as vol
+from homeassistant.config_entries import ConfigEntry, ConfigFlow, OptionsFlow
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.selector import (
     NumberSelector,
@@ -38,6 +38,11 @@ from .const import (
     MODE_STATION,
 )
 from .interpolation import distance_km
+
+try:  # Home Assistant >= 2024.7
+    from homeassistant.config_entries import ConfigFlowResult
+except ImportError:  # pragma: no cover - older Home Assistant core
+    from homeassistant.data_entry_flow import FlowResult as ConfigFlowResult
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -74,7 +79,7 @@ class MuensterWeatherConfigFlow(ConfigFlow, domain=DOMAIN):  # type: ignore[call
         except MuensterWeatherError:
             errors["base"] = "invalid_data"
             stations = []
-        except Exception:  # noqa: BLE001 - expose bugs as unknown, never bad data
+        except Exception:
             _LOGGER.exception("Unexpected error while loading weather stations")
             errors["base"] = "unknown"
             stations = []
@@ -154,7 +159,7 @@ class MuensterWeatherConfigFlow(ConfigFlow, domain=DOMAIN):  # type: ignore[call
                 errors["base"] = "no_stations"
             except MuensterWeatherError:
                 errors["base"] = "invalid_data"
-            except Exception:  # noqa: BLE001 - expose bugs as unknown, never bad data
+            except Exception:
                 _LOGGER.exception("Unexpected error while validating local estimate")
                 errors["base"] = "unknown"
             if not errors:
@@ -180,11 +185,14 @@ class MuensterWeatherConfigFlow(ConfigFlow, domain=DOMAIN):  # type: ignore[call
         )
 
     @staticmethod
-    def async_get_options_flow(config_entry):
-        return MuensterWeatherOptionsFlow()
+    def async_get_options_flow(config_entry: ConfigEntry) -> MuensterWeatherOptionsFlow:
+        return MuensterWeatherOptionsFlow(config_entry)
 
 
 class MuensterWeatherOptionsFlow(OptionsFlow):
+    def __init__(self, config_entry: ConfigEntry) -> None:
+        self.config_entry = config_entry
+
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:

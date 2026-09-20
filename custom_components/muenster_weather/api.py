@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
 import csv
-from dataclasses import dataclass
-from datetime import UTC, datetime
 import io
 import logging
 import math
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Final, TypeAlias
 
 from aiohttp import ClientError, ClientSession
@@ -58,10 +58,6 @@ class CurrentMeasurement:
     humidity_valid: bool
 
 
-# Compatibility alias for the initial public release.
-Measurement = CurrentMeasurement
-
-
 _ID: Final = ("device_id", "deviceid", "stations_id", "station_id", "station", "id")
 _NAME: Final = (
     "description",
@@ -71,6 +67,7 @@ _NAME: Final = (
     "standort",
     "stationsname",
     "station_name",
+    "device_name",
 )
 _TIME: Final = (
     "timestamp",

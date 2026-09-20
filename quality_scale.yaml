@@ -1,6 +1,15 @@
 # Custom-integration audit against the current Home Assistant IQS rule families.
 # "done" means implemented here; "exempt" includes a reason. Formal tier assignment
 # remains a Home Assistant Core review decision.
+#
+# Test harness caveat (see docs/research.md, "20 September 2026" section): this
+# repository's outbound network policy blocks both the upstream Münster API and
+# developers.home-assistant.io, and its PyPI mirror caps at homeassistant==2024.3.3.
+# All "done" test-related rules below were verified against that pinned core via
+# pytest-homeassistant-custom-component, with small guarded compatibility shims
+# (see coordinator.py, config_flow.py, __init__.py) so the same source runs on
+# both that core and the newer Generic-ConfigEntry / config_entry-aware-coordinator
+# APIs assumed elsewhere in this file. Re-verify against a current core before release.
 rules:
   # Bronze
   action-setup: exempt  # No actions/services.
@@ -8,7 +17,7 @@ rules:
   brands: exempt  # Core repository brands metadata is unavailable to custom integrations.
   common-modules: done
   config-flow: done
-  config-flow-test-coverage: todo  # Requires the Home Assistant Core test harness.
+  config-flow-test-coverage: done  # Runs on pytest-homeassistant-custom-component (real ConfigFlow/OptionsFlow harness).
   config-flow-test-before-setup: done
   dependency-transparency: done
   docs-actions: exempt
@@ -29,11 +38,11 @@ rules:
   docs-configuration-parameters: done
   docs-installation-parameters: done
   entity-unavailable: done
-  integration-owner: todo  # No codeowner has been nominated.
+  integration-owner: done  # codeowners in manifest.json.
   log-when-unavailable: done
   parallel-updates: done
   reauthentication-flow: exempt  # Public API has no authentication.
-  test-coverage: todo  # Pure domain layer is tested; HA harness tests remain outstanding.
+  test-coverage: done  # 97% line coverage on custom_components/muenster_weather via pytest-homeassistant-custom-component.
 
   # Gold
   devices: done

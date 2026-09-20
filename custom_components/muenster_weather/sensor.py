@@ -13,13 +13,13 @@ from homeassistant.components.sensor import (
     SensorStateClass,
 )
 from homeassistant.const import (
-    EntityCategory,
     PERCENTAGE,
+    EntityCategory,
     UnitOfLength,
     UnitOfTemperature,
 )
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
+from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from . import MuensterWeatherConfigEntry
 from .const import CONF_MODE, MODE_ESTIMATE
@@ -116,7 +116,7 @@ DESCRIPTIONS = (
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: MuensterWeatherConfigEntry,
-    async_add_entities: AddConfigEntryEntitiesCallback,
+    async_add_entities: AddEntitiesCallback,
 ) -> None:
     estimate = entry.data[CONF_MODE] == MODE_ESTIMATE
     async_add_entities(
