@@ -271,6 +271,22 @@ async def test_client_connection_error_wraps_transport_failure(
         await client.async_get_stations()
 
 
+async def test_client_http_error_status_raises_response_error(
+    hass: HomeAssistant, aioclient_mock
+) -> None:
+    params = dict(LATEST_PARAMS)
+    params["device_ids"] = "50618"
+    aioclient_mock.get(
+        API_URL,
+        params=params,
+        status=400,
+        text="<ServiceExceptionReport>unknown parameter device_ids</ServiceExceptionReport>",
+    )
+    client = MuensterWeatherClient(async_get_clientsession(hass))
+    with pytest.raises(MuensterWeatherResponseError):
+        await client.async_get_latest(["50618"])
+
+
 async def test_client_invalid_json_raises_response_error(
     hass: HomeAssistant, aioclient_mock
 ) -> None:

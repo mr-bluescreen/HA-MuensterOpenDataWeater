@@ -328,12 +328,22 @@ class MuensterWeatherClient:
         try:
             async with self._session.get(API_URL, params=params) as response:
                 _LOGGER.debug("Requesting Münster weather resource: %s", response.url)
-                response.raise_for_status()
                 _LOGGER.debug(
                     "Received Münster weather response: status=%s content_type=%s",
                     response.status,
                     response.content_type,
                 )
+                if response.status >= 400:
+                    body = (await response.text())[:500]
+                    _LOGGER.debug(
+                        "Münster weather resource %s returned HTTP %s: %s",
+                        response.url,
+                        response.status,
+                        body,
+                    )
+                    raise MuensterWeatherResponseError(
+                        f"Upstream returned HTTP {response.status} for {response.url.path}"
+                    )
                 return (
                     await response.json(content_type=None)
                     if json

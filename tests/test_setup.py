@@ -203,6 +203,31 @@ async def test_estimate_exposes_diagnostic_station_count(
     assert state.state == "2"
 
 
+async def test_measurement_fetch_failure_cause_is_logged(
+    hass: HomeAssistant, aioclient_mock, caplog
+) -> None:
+    """The real upstream failure cause must be visible without debug logging."""
+    _mock_stations(aioclient_mock)
+    aioclient_mock.get(
+        API_URL,
+        params=LATEST_PARAMS,
+        status=400,
+        text="<ServiceExceptionReport>bad device_ids filter</ServiceExceptionReport>",
+    )
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="station:50618",
+        title="Aasee",
+        data={CONF_MODE: MODE_STATION, CONF_STATION_ID: "50618", CONF_STATION_NAME: "Aasee"},
+    )
+    entry.add_to_hass(hass)
+    with caplog.at_level("WARNING"):
+        assert not await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+    assert "MuensterWeatherResponseError" in caplog.text
+    assert "HTTP 400" in caplog.text
+
+
 async def test_estimate_temporary_outage_then_recovery(
     hass: HomeAssistant, aioclient_mock
 ) -> None:

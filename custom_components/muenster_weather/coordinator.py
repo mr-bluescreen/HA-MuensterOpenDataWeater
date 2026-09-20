@@ -160,6 +160,11 @@ class MuensterWeatherCoordinator(DataUpdateCoordinator[CoordinatorData]):
             )
             return CoordinatorData(None, interpolate(contributors), contributors)
         except MuensterWeatherError as err:
+            _LOGGER.warning(
+                "Current measurement update failed (%s): %s",
+                type(err).__name__,
+                err,
+            )
             raise UpdateFailed(
                 translation_domain=DOMAIN, translation_key="update_failed"
             ) from err
